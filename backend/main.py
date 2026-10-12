@@ -411,8 +411,9 @@ def _weather_result(req, end_date, history, source,
 async def _nasa_weather(req, today):
     # NASA POWER can publish daily values with a delay.
     # Keep a conservative end date; do not fabricate missing days.
-    end_date = today - timedelta(days=10)
-    start_date = end_date - timedelta(days=req.history_days - 1)
+    # Richiedi giorni recenti, poi individua l'ultima data completa.
+    end_date = today - timedelta(days=1)
+    start_date = end_date - timedelta(days=req.history_days + 14)
 
     params = {
         "parameters": "T2M_MAX,T2M_MIN,PRECTOTCORR",
@@ -443,6 +444,22 @@ async def _nasa_weather(req, today):
             ):
                 return value
             return None
+
+        valid_dates = []
+        for offset in range((end_date - start_date).days + 1):
+            day = start_date + timedelta(days=offset)
+            key = day.strftime("%Y%m%d")
+            if all(
+                valid(parameters.get(name, {}).get(key)) is not None
+                for name in ("T2M_MAX", "T2M_MIN", "PRECTOTCORR")
+            ):
+                valid_dates.append(day)
+
+        if not valid_dates:
+            raise ValueError("Nessuna giornata NASA POWER completa")
+
+        end_date = max(valid_dates)
+        start_date = end_date - timedelta(days=req.history_days - 1)
 
         history = []
         for offset in range(req.history_days):
@@ -486,6 +503,147 @@ async def _nasa_weather(req, today):
         ) from exc
 
 
+
+
+
+async def _met_norway_weather(req):
+    """Meteo attuale e previsioni MET Norway per AgroPlan."""
+    from datetime import datetime, timezone, timedelta, time as dt_time
+    from zoneinfo import ZoneInfo
+
+    headers = {
+        "User-Agent": "AgroPlan/0.1 (agricultural weather application)"
+    }
+    params = {
+        "lat": round(req.latitude, 5),
+        "lon": round(req.longitude, 5),
+    }
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(
+            "https://api.met.no/weatherapi/locationforecast/2.0/compact",
+            params=params,
+            headers=headers,
+        )
+        response.raise_for_status()
+
+    entries = response.json()["properties"]["timeseries"]
+    now = datetime.now(timezone.utc)
+    tz = ZoneInfo("Europe/Rome")
+
+    first_day = now.astimezone(tz).date()
+    last_day = first_day + timedelta(days=6)
+
+    current = {}
+    temperatures = {}
+    candidates = []
+
+    for entry in entries:
+        timestamp = datetime.fromisoformat(
+            entry["time"].replace("Z", "+00:00")
+        )
+        if timestamp < now:
+            continue
+
+        details = entry["data"]["instant"]["details"]
+
+        if not current:
+            wind = details.get("wind_speed")
+            current = {
+                "time": entry["time"],
+                "temperature_2m": details.get("air_temperature"),
+                "relative_humidity_2m": details.get("relative_humidity"),
+                "wind_speed_10m": (
+                    round(wind * 3.6, 1) if wind is not None else None
+                ),
+                "precipitation": None,
+            }
+
+        day = timestamp.astimezone(tz).date()
+        temperature = details.get("air_temperature")
+
+        if first_day <= day <= last_day and temperature is not None:
+            temperatures.setdefault(day, []).append(temperature)
+
+        # Raccolta degli intervalli disponibili.
+        for hours in (1, 6):
+            period = entry["data"].get(f"next_{hours}_hours", {})
+            rain = period.get("details", {}).get("precipitation_amount")
+
+            if rain is not None:
+                candidates.append((
+                    timestamp,
+                    timestamp + timedelta(hours=hours),
+                    float(rain),
+                    hours,
+                ))
+
+    # Preferisce intervalli brevi e non sovrapposti.
+    selected = []
+    for interval in sorted(candidates, key=lambda x: (x[3], x[0])):
+        start, end, rain, hours = interval
+
+        if any(
+            start < other_end and end > other_start
+            for other_start, other_end, _, _ in selected
+        ):
+            continue
+
+        selected.append(interval)
+
+    forecast = []
+
+    for offset in range(7):
+        day = first_day + timedelta(days=offset)
+
+        day_start = datetime.combine(
+            day, dt_time.min, tzinfo=tz
+        ).astimezone(timezone.utc)
+
+        day_end = datetime.combine(
+            day + timedelta(days=1), dt_time.min, tzinfo=tz
+        ).astimezone(timezone.utc)
+
+        # Per oggi consideriamo soltanto il periodo futuro.
+        period_start = max(day_start, now)
+
+        rain_total = 0.0
+        coverage = []
+
+        for start, end, rain, hours in selected:
+            overlap_start = max(start, period_start)
+            overlap_end = min(end, day_end)
+
+            if overlap_end <= overlap_start:
+                continue
+
+            overlap_seconds = (overlap_end - overlap_start).total_seconds()
+            interval_seconds = (end - start).total_seconds()
+
+            rain_total += rain * overlap_seconds / interval_seconds
+            coverage.append((overlap_start, overlap_end))
+
+        cursor = period_start
+        for start, end in sorted(coverage):
+            if start > cursor:
+                break
+            cursor = max(cursor, end)
+
+        complete = cursor >= day_end
+        temps = temperatures.get(day, [])
+
+        forecast.append({
+            "date": day.isoformat(),
+            "temperature_2m_max": max(temps) if temps else None,
+            "temperature_2m_min": min(temps) if temps else None,
+            "precipitation_sum": (
+                round(rain_total, 1) if complete else None
+            ),
+            "et0_fao_evapotranspiration": None,
+        })
+
+    return current, forecast
+
 @app.post("/weather")
 async def parcel_weather(req: WeatherRequest):
     today = DateType.today()
@@ -507,77 +665,103 @@ async def parcel_weather(req: WeatherRequest):
         if cached and time.monotonic() - cached["time"] < WEATHER_CACHE_SECONDS:
             return cached["data"]
 
-        end_date = today - timedelta(days=5)
-        start_date = end_date - timedelta(days=req.history_days - 1)
-
-        daily = (
-            "temperature_2m_max,temperature_2m_min,"
-            "precipitation_sum,et0_fao_evapotranspiration"
-        )
-
-        common = {
-            "latitude": req.latitude,
-            "longitude": req.longitude,
-            "daily": daily,
-            "timezone": "Europe/Rome",
-        }
-
         try:
-            async with httpx.AsyncClient(timeout=35) as client:
-                archive, future = await asyncio.gather(
-                    client.get(
-                        "https://archive-api.open-meteo.com/v1/archive",
-                        params={
-                            **common,
-                            "start_date": start_date.isoformat(),
-                            "end_date": end_date.isoformat(),
-                        },
+            result = await _nasa_weather(req, today)
+        except HTTPException:
+            print('[METEO] NASA non disponibile; provo Open-Meteo', flush=True)
+            result = None
+
+        if result is None:
+            end_date = today - timedelta(days=5)
+            start_date = end_date - timedelta(days=req.history_days - 1)
+
+            daily = (
+                "temperature_2m_max,temperature_2m_min,"
+                "precipitation_sum,et0_fao_evapotranspiration"
+            )
+
+            common = {
+                "latitude": req.latitude,
+                "longitude": req.longitude,
+                "daily": daily,
+                "timezone": "Europe/Rome",
+            }
+
+            try:
+                async with httpx.AsyncClient(timeout=35) as client:
+                    archive, future = await asyncio.gather(
+                        client.get(
+                            "https://archive-api.open-meteo.com/v1/archive",
+                            params={
+                                **common,
+                                "start_date": start_date.isoformat(),
+                                "end_date": end_date.isoformat(),
+                            },
+                        ),
+                        client.get(
+                            "https://api.open-meteo.com/v1/forecast",
+                            params={
+                                **common,
+                                "forecast_days": 7,
+                                "current": (
+                                    "temperature_2m,relative_humidity_2m,"
+                                    "precipitation,wind_speed_10m"
+                                ),
+                            },
+                        ),
+                    )
+
+                archive.raise_for_status()
+                future.raise_for_status()
+
+                historic = archive.json().get("daily", {})
+                forecast = future.json()
+
+                if not historic.get("time"):
+                    raise ValueError("Storico Open-Meteo vuoto")
+
+                result = _weather_result(
+                    req,
+                    end_date,
+                    _weather_rows(historic),
+                    "Open-Meteo",
+                    forecast=_weather_rows(
+                        forecast.get("daily", {"time": []})
                     ),
-                    client.get(
-                        "https://api.open-meteo.com/v1/forecast",
-                        params={
-                            **common,
-                            "forecast_days": 7,
-                            "current": (
-                                "temperature_2m,relative_humidity_2m,"
-                                "precipitation,wind_speed_10m"
-                            ),
-                        },
+                    current=forecast.get("current", {}),
+                    note=(
+                        "Dati meteorologici modellati su griglia. "
+                        "Lo storico termina alla data historical_end; "
+                        "gli ultimi giorni non sono inclusi."
                     ),
                 )
 
-            archive.raise_for_status()
-            future.raise_for_status()
+            except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+                print(
+                    f"[METEO] Open-Meteo non disponibile: "
+                    f"{type(exc).__name__}; provo NASA POWER",
+                    flush=True,
+                )
+                raise HTTPException(status_code=503, detail='Fonti meteo non disponibili')
 
-            historic = archive.json().get("daily", {})
-            forecast = future.json()
-
-            if not historic.get("time"):
-                raise ValueError("Storico Open-Meteo vuoto")
-
-            result = _weather_result(
-                req,
-                end_date,
-                _weather_rows(historic),
-                "Open-Meteo",
-                forecast=_weather_rows(
-                    forecast.get("daily", {"time": []})
-                ),
-                current=forecast.get("current", {}),
-                note=(
-                    "Dati meteorologici modellati su griglia. "
-                    "Lo storico termina alla data historical_end; "
-                    "gli ultimi giorni non sono inclusi."
-                ),
-            )
-
+        # MET Norway fornisce condizioni attuali e previsioni.
+        # Lo storico rimane quello già recuperato.
+        try:
+            met_current, met_forecast = await _met_norway_weather(req)
+            if met_forecast:
+                result["current"] = met_current
+                result["forecast"] = met_forecast
+                result["forecast_source"] = "MET Norway"
+                result["note"] += (
+                    " Condizioni attuali e previsioni: MET Norway. "
+                    "Le precipitazioni giornaliere possono essere "
+                    "parziali quando mancano intervalli orari."
+                )
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
             print(
-                f"[METEO] Open-Meteo non disponibile: "
-                f"{type(exc).__name__}; provo NASA POWER",
+                f"[METEO] MET Norway non disponibile: {exc}",
                 flush=True,
             )
-            result = await _nasa_weather(req, today)
 
         _weather_cache[key] = {
             "time": time.monotonic(),
@@ -593,31 +777,3 @@ app.include_router(soil_router)
 
 from agronomy_engine import register_agronomy_routes
 register_agronomy_routes(app, parcel_weather, WeatherRequest)
-
-@app.get("/test-met-norway")
-async def test_met_norway():
-    import httpx
-
-    url = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
-    headers = {"User-Agent": "AgroPlan/0.1 (development testing)"}
-    params = {"lat": 44.62086, "lon": 11.27793}
-
-    try:
-        async with httpx.AsyncClient(timeout=25) as client:
-            response = await client.get(url, headers=headers, params=params)
-
-        result = {
-            "status_code": response.status_code,
-            "success": response.status_code == 200,
-        }
-
-        if response.status_code == 200:
-            timeseries = response.json()["properties"]["timeseries"]
-            result["forecast_points"] = len(timeseries)
-            result["last_forecast"] = timeseries[-1]["time"]
-        else:
-            result["error"] = response.text[:200]
-
-        return result
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
