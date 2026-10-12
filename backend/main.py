@@ -350,32 +350,171 @@ class WeatherRequest(BaseModel):
     longitude: float = Field(ge=6, le=19)
     history_days: int = Field(default=60, ge=7, le=180)
 
+
 _weather_cache = {}
 _weather_locks = {}
 WEATHER_CACHE_SECONDS = 3600
 
+
+def _weather_rows(raw):
+    keys = (
+        "temperature_2m_max",
+        "temperature_2m_min",
+        "precipitation_sum",
+        "et0_fao_evapotranspiration",
+    )
+    dates = raw.get("time", [])
+    return [
+        {
+            "date": day,
+            **{
+                key: (
+                    raw[key][i]
+                    if isinstance(raw.get(key), list)
+                    and i < len(raw[key])
+                    else None
+                )
+                for key in keys
+            },
+        }
+        for i, day in enumerate(dates)
+    ]
+
+
+def _weather_result(req, end_date, history, source,
+                    forecast=None, current=None, note=""):
+    def rain_total(days):
+        rows = history[-days:]
+        values = [r.get("precipitation_sum") for r in rows]
+        if len(rows) != days or any(
+            not isinstance(v, (int, float)) or isinstance(v, bool)
+            for v in values
+        ):
+            return None
+        return round(sum(values), 1)
+
+    return {
+        "source": source,
+        "latitude": req.latitude,
+        "longitude": req.longitude,
+        "historical_end": end_date.isoformat(),
+        "history": history,
+        "forecast": forecast if forecast is not None else [],
+        "current": current if current is not None else {},
+        "rain_7d_mm": rain_total(7),
+        "rain_15d_mm": rain_total(15),
+        "rain_30d_mm": rain_total(30),
+        "note": note,
+    }
+
+
+async def _nasa_weather(req, today):
+    # NASA POWER can publish daily values with a delay.
+    # Keep a conservative end date; do not fabricate missing days.
+    end_date = today - timedelta(days=10)
+    start_date = end_date - timedelta(days=req.history_days - 1)
+
+    params = {
+        "parameters": "T2M_MAX,T2M_MIN,PRECTOTCORR",
+        "community": "AG",
+        "latitude": req.latitude,
+        "longitude": req.longitude,
+        "start": start_date.strftime("%Y%m%d"),
+        "end": end_date.strftime("%Y%m%d"),
+        "format": "JSON",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            response = await client.get(
+                "https://power.larc.nasa.gov/api/temporal/daily/point",
+                params=params,
+            )
+            response.raise_for_status()
+            payload = response.json()
+
+        parameters = payload["properties"]["parameter"]
+
+        def valid(value):
+            if (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and value > -900
+            ):
+                return value
+            return None
+
+        history = []
+        for offset in range(req.history_days):
+            day = start_date + timedelta(days=offset)
+            key = day.strftime("%Y%m%d")
+            history.append({
+                "date": day.isoformat(),
+                "temperature_2m_max": valid(
+                    parameters.get("T2M_MAX", {}).get(key)
+                ),
+                "temperature_2m_min": valid(
+                    parameters.get("T2M_MIN", {}).get(key)
+                ),
+                "precipitation_sum": valid(
+                    parameters.get("PRECTOTCORR", {}).get(key)
+                ),
+                "et0_fao_evapotranspiration": None,
+            })
+
+        if not any(
+            row["precipitation_sum"] is not None
+            for row in history
+        ):
+            raise ValueError("NASA POWER non ha restituito precipitazioni valide")
+
+        return _weather_result(
+            req, end_date, history, "NASA POWER",
+            note=(
+                "Fallback NASA POWER: dati storici modellati su griglia. "
+                "Previsioni e condizioni attuali non disponibili. "
+                "ET0 non calcolata: il bilancio climatico P - ET0 "
+                "non è disponibile. Lo storico termina alla data "
+                "historical_end e può avere un ritardo di pubblicazione."
+            ),
+        )
+
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Open-Meteo non disponibile e fallback NASA POWER non riuscito.",
+        ) from exc
+
+
 @app.post("/weather")
 async def parcel_weather(req: WeatherRequest):
     today = DateType.today()
-    key = (round(req.latitude, 5), round(req.longitude, 5),
-           req.history_days, today.isoformat())
+    key = (
+        round(req.latitude, 5),
+        round(req.longitude, 5),
+        req.history_days,
+        today.isoformat(),
+    )
 
-    now = time.monotonic()
     cached = _weather_cache.get(key)
-    if cached and now - cached["time"] < WEATHER_CACHE_SECONDS:
+    if cached and time.monotonic() - cached["time"] < WEATHER_CACHE_SECONDS:
         return cached["data"]
 
     lock = _weather_locks.setdefault(key, asyncio.Lock())
 
     async with lock:
-        now = time.monotonic()
         cached = _weather_cache.get(key)
-        if cached and now - cached["time"] < WEATHER_CACHE_SECONDS:
+        if cached and time.monotonic() - cached["time"] < WEATHER_CACHE_SECONDS:
             return cached["data"]
 
-        archive_end = today - timedelta(days=5)
-        archive_start = archive_end - timedelta(days=req.history_days - 1)
-        daily = "temperature_2m_max,temperature_2m_min,precipitation_sum,et0_fao_evapotranspiration"
+        end_date = today - timedelta(days=5)
+        start_date = end_date - timedelta(days=req.history_days - 1)
+
+        daily = (
+            "temperature_2m_max,temperature_2m_min,"
+            "precipitation_sum,et0_fao_evapotranspiration"
+        )
+
         common = {
             "latitude": req.latitude,
             "longitude": req.longitude,
@@ -385,13 +524,13 @@ async def parcel_weather(req: WeatherRequest):
 
         try:
             async with httpx.AsyncClient(timeout=35) as client:
-                a, f = await asyncio.gather(
+                archive, future = await asyncio.gather(
                     client.get(
                         "https://archive-api.open-meteo.com/v1/archive",
                         params={
                             **common,
-                            "start_date": archive_start.isoformat(),
-                            "end_date": archive_end.isoformat(),
+                            "start_date": start_date.isoformat(),
+                            "end_date": end_date.isoformat(),
                         },
                     ),
                     client.get(
@@ -399,87 +538,53 @@ async def parcel_weather(req: WeatherRequest):
                         params={
                             **common,
                             "forecast_days": 7,
-                            "current": "temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m",
+                            "current": (
+                                "temperature_2m,relative_humidity_2m,"
+                                "precipitation,wind_speed_10m"
+                            ),
                         },
                     ),
                 )
 
-            if a.status_code == 429 or f.status_code == 429:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Servizio meteorologico temporaneamente limitato. Riprova più tardi.",
-                )
+            archive.raise_for_status()
+            future.raise_for_status()
 
-            a.raise_for_status()
-            f.raise_for_status()
-
-            historic = a.json().get("daily", {})
-            future = f.json()
+            historic = archive.json().get("daily", {})
+            forecast = future.json()
 
             if not historic.get("time"):
-                raise HTTPException(
-                    status_code=502,
-                    detail="Storico meteo non disponibile",
-                )
+                raise ValueError("Storico Open-Meteo vuoto")
 
-            def rows(raw):
-                keys = [
-                    "temperature_2m_max",
-                    "temperature_2m_min",
-                    "precipitation_sum",
-                    "et0_fao_evapotranspiration",
-                ]
-                return [
-                    {
-                        "date": d,
-                        **{
-                            k: (raw.get(k) or [None] * len(raw["time"]))[i]
-                            for k in keys
-                        },
-                    }
-                    for i, d in enumerate(raw["time"])
-                ]
-
-            history = rows(historic)
-
-            def rain_total(days):
-                vals = [r["precipitation_sum"] for r in history[-days:]]
-                return (
-                    round(sum(x for x in vals if isinstance(x, (int, float))), 1)
-                    if all(isinstance(x, (int, float)) for x in vals)
-                    else None
-                )
-
-            result = {
-                "source": "Open-Meteo",
-                "latitude": req.latitude,
-                "longitude": req.longitude,
-                "historical_end": archive_end.isoformat(),
-                "history": history,
-                "forecast": rows(future.get("daily", {"time": []})),
-                "current": future.get("current", {}),
-                "rain_7d_mm": rain_total(7),
-                "rain_15d_mm": rain_total(15),
-                "rain_30d_mm": rain_total(30),
-                "note": (
-                    "Dati meteorologici modellati su griglia, non misurazioni in campo. "
-                    "Le piogge cumulate terminano alla data historical_end; "
+            result = _weather_result(
+                req,
+                end_date,
+                _weather_rows(historic),
+                "Open-Meteo",
+                forecast=_weather_rows(
+                    forecast.get("daily", {"time": []})
+                ),
+                current=forecast.get("current", {}),
+                note=(
+                    "Dati meteorologici modellati su griglia. "
+                    "Lo storico termina alla data historical_end; "
                     "gli ultimi giorni non sono inclusi."
                 ),
-            }
+            )
 
-            _weather_cache[key] = {
-                "time": time.monotonic(),
-                "data": result,
-            }
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            print(
+                f"[METEO] Open-Meteo non disponibile: "
+                f"{type(exc).__name__}; provo NASA POWER",
+                flush=True,
+            )
+            result = await _nasa_weather(req, today)
 
-            return result
+        _weather_cache[key] = {
+            "time": time.monotonic(),
+            "data": result,
+        }
+        return result
 
-        except httpx.HTTPError as exc:
-            raise HTTPException(
-                status_code=502,
-                detail="Servizio meteorologico momentaneamente non disponibile.",
-            ) from exc
 
 from crop_api import register_crop_routes
 register_crop_routes(app)
@@ -488,46 +593,3 @@ app.include_router(soil_router)
 
 from agronomy_engine import register_agronomy_routes
 register_agronomy_routes(app, parcel_weather, WeatherRequest)
-
-
-@app.get("/diagnostics/nasa-power")
-async def diagnose_nasa_power():
-    """Test temporaneo della connettività NASA POWER da Render."""
-    url = "https://power.larc.nasa.gov/api/temporal/daily/point"
-    params = {
-        "parameters": "T2M_MAX,T2M_MIN,PRECTOTCORR",
-        "community": "AG",
-        "latitude": 44.62086,
-        "longitude": 11.27793,
-        "start": "20260901",
-        "end": "20260910",
-        "format": "JSON",
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.get(url, params=params)
-
-        result = {
-            "service": "NASA POWER",
-            "upstream_status": response.status_code,
-            "reachable": response.status_code == 200,
-        }
-
-        if response.status_code == 200:
-            data = response.json()
-            parameters = data.get("properties", {}).get("parameter", {})
-            result["available_parameters"] = list(parameters.keys())
-            result["sample"] = {
-                name: list(values.items())[:2]
-                for name, values in parameters.items()
-            }
-
-        return result
-
-    except Exception as exc:
-        return {
-            "service": "NASA POWER",
-            "reachable": False,
-            "error_type": type(exc).__name__,
-        }

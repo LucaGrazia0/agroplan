@@ -194,7 +194,7 @@ def build_indicators(weather, crop):
             )
 
     return {
-        "source": "Open-Meteo",
+        "source": weather.get("source", "Sconosciuta"),
         "historical_end": weather.get("historical_end"),
         "crop_context": crop,
         "windows": windows,
