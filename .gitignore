@@ -1,0 +1,53 @@
+# Credenziali
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Database e backup
+*.db
+*.sqlite
+*.sqlite3
+*.db-*
+*.backup*
+*.bak
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+
+# Vecchi ambienti Python
+.venv*/
+venv*/
+venv/
+
+# Backup locali del progetto
+backup_*/
+*_backup/
+*.backup
+
+# File macOS
+.DS_Store
+
+# File locali e sensibili
+*.log
+*.pem
+*.key
+*.p12
+*.p8
+
+# File locali dell'IDE
+.idea/
+*.iml
+
+# File generati accidentalmente con suffisso numerico
+.flutter-plugins-dependencies 2
+ios/Flutter/Generated 2.xcconfig
+ios/Flutter/flutter_export_environment 2.sh
