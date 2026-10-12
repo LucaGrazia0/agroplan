@@ -350,46 +350,136 @@ class WeatherRequest(BaseModel):
     longitude: float = Field(ge=6, le=19)
     history_days: int = Field(default=60, ge=7, le=180)
 
+_weather_cache = {}
+_weather_locks = {}
+WEATHER_CACHE_SECONDS = 3600
+
 @app.post("/weather")
 async def parcel_weather(req: WeatherRequest):
     today = DateType.today()
-    # Historical archive is not always up to date; stop several days before today.
-    archive_end = today - timedelta(days=5)
-    archive_start = archive_end - timedelta(days=req.history_days - 1)
-    daily = "temperature_2m_max,temperature_2m_min,precipitation_sum,et0_fao_evapotranspiration"
-    common = {"latitude": req.latitude, "longitude": req.longitude,
-              "daily": daily, "timezone": "Europe/Rome"}
-    try:
-        async with httpx.AsyncClient(timeout=35) as client:
-            a, f = await asyncio.gather(
-                client.get("https://archive-api.open-meteo.com/v1/archive",
-                           params={**common, "start_date": archive_start.isoformat(), "end_date": archive_end.isoformat()}),
-                client.get("https://api.open-meteo.com/v1/forecast",
-                           params={**common, "forecast_days": 7,
-                                   "current": "temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m"}),
-            )
-        a.raise_for_status(); f.raise_for_status()
-        historic = a.json().get("daily", {})
-        future = f.json()
-        if not historic.get("time"):
-            raise HTTPException(status_code=502, detail="Storico meteo non disponibile")
-        def rows(raw):
-            keys = ["temperature_2m_max", "temperature_2m_min", "precipitation_sum", "et0_fao_evapotranspiration"]
-            return [{"date": d, **{k: (raw.get(k) or [None] * len(raw["time"]))[i] for k in keys}}
-                    for i, d in enumerate(raw["time"])]
-        history = rows(historic)
-        def rain_total(days):
-            vals = [r["precipitation_sum"] for r in history[-days:]]
-            return round(sum(x for x in vals if isinstance(x, (int, float))), 1) if all(isinstance(x, (int, float)) for x in vals) else None
-        return {"source": "Open-Meteo", "latitude": req.latitude, "longitude": req.longitude,
-                "historical_end": archive_end.isoformat(), "history": history,
+    key = (round(req.latitude, 5), round(req.longitude, 5),
+           req.history_days, today.isoformat())
+
+    now = time.monotonic()
+    cached = _weather_cache.get(key)
+    if cached and now - cached["time"] < WEATHER_CACHE_SECONDS:
+        return cached["data"]
+
+    lock = _weather_locks.setdefault(key, asyncio.Lock())
+
+    async with lock:
+        now = time.monotonic()
+        cached = _weather_cache.get(key)
+        if cached and now - cached["time"] < WEATHER_CACHE_SECONDS:
+            return cached["data"]
+
+        archive_end = today - timedelta(days=5)
+        archive_start = archive_end - timedelta(days=req.history_days - 1)
+        daily = "temperature_2m_max,temperature_2m_min,precipitation_sum,et0_fao_evapotranspiration"
+        common = {
+            "latitude": req.latitude,
+            "longitude": req.longitude,
+            "daily": daily,
+            "timezone": "Europe/Rome",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=35) as client:
+                a, f = await asyncio.gather(
+                    client.get(
+                        "https://archive-api.open-meteo.com/v1/archive",
+                        params={
+                            **common,
+                            "start_date": archive_start.isoformat(),
+                            "end_date": archive_end.isoformat(),
+                        },
+                    ),
+                    client.get(
+                        "https://api.open-meteo.com/v1/forecast",
+                        params={
+                            **common,
+                            "forecast_days": 7,
+                            "current": "temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m",
+                        },
+                    ),
+                )
+
+            if a.status_code == 429 or f.status_code == 429:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Servizio meteorologico temporaneamente limitato. Riprova più tardi.",
+                )
+
+            a.raise_for_status()
+            f.raise_for_status()
+
+            historic = a.json().get("daily", {})
+            future = f.json()
+
+            if not historic.get("time"):
+                raise HTTPException(
+                    status_code=502,
+                    detail="Storico meteo non disponibile",
+                )
+
+            def rows(raw):
+                keys = [
+                    "temperature_2m_max",
+                    "temperature_2m_min",
+                    "precipitation_sum",
+                    "et0_fao_evapotranspiration",
+                ]
+                return [
+                    {
+                        "date": d,
+                        **{
+                            k: (raw.get(k) or [None] * len(raw["time"]))[i]
+                            for k in keys
+                        },
+                    }
+                    for i, d in enumerate(raw["time"])
+                ]
+
+            history = rows(historic)
+
+            def rain_total(days):
+                vals = [r["precipitation_sum"] for r in history[-days:]]
+                return (
+                    round(sum(x for x in vals if isinstance(x, (int, float))), 1)
+                    if all(isinstance(x, (int, float)) for x in vals)
+                    else None
+                )
+
+            result = {
+                "source": "Open-Meteo",
+                "latitude": req.latitude,
+                "longitude": req.longitude,
+                "historical_end": archive_end.isoformat(),
+                "history": history,
                 "forecast": rows(future.get("daily", {"time": []})),
                 "current": future.get("current", {}),
-                "rain_7d_mm": rain_total(7), "rain_15d_mm": rain_total(15),
+                "rain_7d_mm": rain_total(7),
+                "rain_15d_mm": rain_total(15),
                 "rain_30d_mm": rain_total(30),
-                "note": "Dati meteorologici modellati su griglia, non misurazioni in campo. Le piogge cumulate terminano alla data historical_end; gli ultimi giorni non sono inclusi."}
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Servizio meteo non raggiungibile: {exc}") from exc
+                "note": (
+                    "Dati meteorologici modellati su griglia, non misurazioni in campo. "
+                    "Le piogge cumulate terminano alla data historical_end; "
+                    "gli ultimi giorni non sono inclusi."
+                ),
+            }
+
+            _weather_cache[key] = {
+                "time": time.monotonic(),
+                "data": result,
+            }
+
+            return result
+
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Servizio meteorologico momentaneamente non disponibile.",
+            ) from exc
 
 from crop_api import register_crop_routes
 register_crop_routes(app)
