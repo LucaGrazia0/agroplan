@@ -488,3 +488,46 @@ app.include_router(soil_router)
 
 from agronomy_engine import register_agronomy_routes
 register_agronomy_routes(app, parcel_weather, WeatherRequest)
+
+
+@app.get("/diagnostics/nasa-power")
+async def diagnose_nasa_power():
+    """Test temporaneo della connettività NASA POWER da Render."""
+    url = "https://power.larc.nasa.gov/api/temporal/daily/point"
+    params = {
+        "parameters": "T2M_MAX,T2M_MIN,PRECTOTCORR",
+        "community": "AG",
+        "latitude": 44.62086,
+        "longitude": 11.27793,
+        "start": "20260901",
+        "end": "20260910",
+        "format": "JSON",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.get(url, params=params)
+
+        result = {
+            "service": "NASA POWER",
+            "upstream_status": response.status_code,
+            "reachable": response.status_code == 200,
+        }
+
+        if response.status_code == 200:
+            data = response.json()
+            parameters = data.get("properties", {}).get("parameter", {})
+            result["available_parameters"] = list(parameters.keys())
+            result["sample"] = {
+                name: list(values.items())[:2]
+                for name, values in parameters.items()
+            }
+
+        return result
+
+    except Exception as exc:
+        return {
+            "service": "NASA POWER",
+            "reachable": False,
+            "error_type": type(exc).__name__,
+        }
