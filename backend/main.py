@@ -593,3 +593,31 @@ app.include_router(soil_router)
 
 from agronomy_engine import register_agronomy_routes
 register_agronomy_routes(app, parcel_weather, WeatherRequest)
+
+@app.get("/test-met-norway")
+async def test_met_norway():
+    import httpx
+
+    url = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
+    headers = {"User-Agent": "AgroPlan/0.1 (development testing)"}
+    params = {"lat": 44.62086, "lon": 11.27793}
+
+    try:
+        async with httpx.AsyncClient(timeout=25) as client:
+            response = await client.get(url, headers=headers, params=params)
+
+        result = {
+            "status_code": response.status_code,
+            "success": response.status_code == 200,
+        }
+
+        if response.status_code == 200:
+            timeseries = response.json()["properties"]["timeseries"]
+            result["forecast_points"] = len(timeseries)
+            result["last_forecast"] = timeseries[-1]["time"]
+        else:
+            result["error"] = response.text[:200]
+
+        return result
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
