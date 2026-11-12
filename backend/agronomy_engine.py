@@ -6,7 +6,9 @@ import math
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from crop_api import connect
+from storage import connect
+from auth import CurrentUser, require_parcel
+from weather_history import daily_window
 from agronomy_alerts import build_alerts
 
 router = APIRouter(prefix="/agronomy", tags=["Agronomy"])
@@ -76,15 +78,8 @@ def crop_context(parcel_id, season):
         }
 
 
-def calculate_window(history, days):
-    rows = sorted(
-        (
-            row for row in history
-            if isinstance(row, dict)
-            and isinstance(row.get("date"), str)
-        ),
-        key=lambda row: row["date"],
-    )[-days:]
+def calculate_window(history, days, end=None):
+    rows = daily_window(history, days, end)
 
     keys = {
         "rain": "precipitation_sum",
@@ -161,7 +156,7 @@ def build_indicators(weather, crop):
         )
 
     windows = {
-        str(days): calculate_window(history, days)
+        str(days): calculate_window(history, days, date.fromisoformat(weather["historical_end"]))
         for days in (7, 15, 30)
     }
 
@@ -220,7 +215,8 @@ def build_indicators(weather, crop):
 
 def register_agronomy_routes(app, weather_handler, weather_request_class):
     @router.post("/analyze")
-    async def analyze(req: AgronomyRequest):
+    async def analyze(req: AgronomyRequest, user: CurrentUser):
+        require_parcel(req.parcel_id, user)
         crop = crop_context(req.parcel_id, req.season)
 
         weather = await weather_handler(
@@ -240,5 +236,4 @@ def register_agronomy_routes(app, weather_handler, weather_request_class):
             **result,
         }
 
-    for route in router.routes:
-        app.router.routes.append(route)
+    app.include_router(router)

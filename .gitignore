@@ -51,3 +51,22 @@ backup_*/
 .flutter-plugins-dependencies 2
 ios/Flutter/Generated 2.xcconfig
 ios/Flutter/flutter_export_environment 2.sh
+
+# Copia storica dell’interfaccia; l’app attiva usa lib/.
+/flutter/
+/backend/weather_addition.py.txt
+
+# Cache e file generati
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+*.db-shm
+*.db-wal
+# Flutter package metadata and signing material
+.pub-cache/
+.pub/
+**/key.properties
+**/*.keystore
+**/*.jks
+**/xcuserdata/

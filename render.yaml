@@ -1,14 +1,25 @@
+# Richiede servizio e disco a pagamento. Applicare dal dashboard solo dopo
+# aver verificato i costi. Questo file non esegue alcun deploy da solo.
 services:
   - type: web
     name: agroplan-backend
     runtime: python
-    plan: free
+    plan: starter
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements-lock.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    disk:
+      name: agroplan-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.15
+      - key: AGROPLAN_DB_PATH
+        value: /var/data/agroplan.db
+      - key: CORS_ORIGINS
+        sync: false
       - key: COPERNICUS_CLIENT_ID
         sync: false
       - key: COPERNICUS_CLIENT_SECRET
