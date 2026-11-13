@@ -21,6 +21,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(const AgroPlanApp());
+    await tester.pumpAndSettle();
     expect(find.text('Accedi alla tua azienda'), findsOneWidget);
     expect(find.byType(TextField), findsNWidgets(2));
     expect(find.text('Accedi'), findsOneWidget);

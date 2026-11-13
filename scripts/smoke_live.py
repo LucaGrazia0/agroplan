@@ -24,7 +24,7 @@ def run():
         token=secrets.token_urlsafe(32)
         password=secrets.token_urlsafe(24)
         env={**os.environ,'AGROPLAN_DB_PATH':str(directory/'smoke.sqlite'),
-             'AGROPLAN_SETUP_TOKEN':token}
+             'AGROPLAN_SETUP_TOKEN':token,'AGROPLAN_LOCAL_MODE':'0'}
         with (directory/'server.log').open('w') as log:
             server=subprocess.Popen([sys.executable,'-m','uvicorn','main:app','--app-dir',str(ROOT/'backend'),
                 '--host','127.0.0.1','--port',str(port),'--log-level','warning'],cwd=ROOT,env=env,stdout=log,stderr=log)

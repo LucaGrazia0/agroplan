@@ -48,6 +48,39 @@ void main() {
     expect(days.last['cloud_cover'], 5);
   });
   testWidgets(
+    'La modalità locale apre direttamente l’app senza modulo password',
+    (tester) async {
+      useHttpClientForTesting(
+        MockClient(
+          (_) async => http.Response(
+            jsonEncode({
+              'local_mode': true,
+              'setup_required': false,
+              'setup_enabled': false,
+              'user': {'username': 'Uso locale', 'farm_id': 'azienda-locale'},
+            }),
+            200,
+          ),
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ListenableBuilder(
+            listenable: ApiSession.instance,
+            builder: (_, _) => ApiSession.instance.authenticated
+                ? const Text('App locale aperta')
+                : const LoginPage(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('App locale aperta'), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+      expect(ApiSession.instance.localAccess, isTrue);
+    },
+  );
+
+  testWidgets(
     'Il primo accesso richiede conferma password e attiva l’account',
     (tester) async {
       Map<String, dynamic>? posted;

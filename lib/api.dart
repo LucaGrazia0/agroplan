@@ -33,7 +33,8 @@ class ApiSession extends ChangeNotifier {
   String? _token;
   String? username;
   String? farmId;
-  bool get authenticated => _token != null;
+  bool localAccess = false;
+  bool get authenticated => _token != null || localAccess;
 
   Future<void> login(String username, String password) async {
     final response = await _client
@@ -53,6 +54,7 @@ class ApiSession extends ChangeNotifier {
       );
     }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
+    localAccess = false;
     _token = data['access_token'] as String;
     this.username = data['user']['username'] as String;
     farmId = data['user']['farm_id'] as String;
@@ -64,7 +66,15 @@ class ApiSession extends ChangeNotifier {
         .get(Uri.parse('$apiBaseUrl/auth/status'))
         .timeout(const Duration(seconds: 15));
     if (response.statusCode != 200) throw Exception('Server non raggiungibile');
-    return jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (data['local_mode'] == true) {
+      localAccess = true;
+      _token = null;
+      username = data['user']['username'] as String;
+      farmId = data['user']['farm_id'] as String;
+      notifyListeners();
+    }
+    return data;
   }
 
   Future<void> setup({
@@ -117,7 +127,8 @@ class ApiSession extends ChangeNotifier {
   }
 
   void clear() {
-    if (_token == null) return;
+    if (_token == null && !localAccess) return;
+    localAccess = false;
     _token = null;
     username = null;
     farmId = null;

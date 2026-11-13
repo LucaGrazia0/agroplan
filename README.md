@@ -12,9 +12,11 @@ bash 'Avvia AgroPlan.command'
 
 L’avvio prepara un ambiente Python isolato in `.local/runtime`, installa le versioni verificate e compila l’interfaccia solo se necessario. Quando la build è già aggiornata, non serve avviare Flutter. Alla prima compilazione occorrono Python 3.12 e Flutter 3.47.6 / Dart 3.13.5; `FLUTTER_BIN` permette di scegliere un’installazione Flutter specifica.
 
-L’app si apre su **http://localhost:8091**. Al primo avvio scegli nome utente, password e identificativo azienda. La password richiede almeno 12 caratteri e non va inviata in chat. Il collegamento aperto dal launcher contiene un codice monouso: il server non permette registrazioni libere. In modalità `--no-browser` il collegamento riservato si trova in `.local/setup-link.txt`, leggibile solo dal proprietario. Riaprire il launcher apre lo stesso servizio già attivo; non avvia un secondo server e non termina altri processi.
+L’app si apre su **http://localhost:8091** direttamente, **senza nome utente o password**. Questa modalità è limitata al Mac: il servizio ascolta solo sull’interfaccia locale e rifiuta l’accesso senza credenziali da host o origini esterne. I dati locali precedenti vengono mantenuti nell’azienda locale; gli eventuali account già creati restano conservati.
 
-Se il vecchio database contiene dati, viene creato un backup verificato **prima** della migrazione in `backend/backups/`. Nel primo accesso si può scegliere esplicitamente di associare i dati precedenti alla propria azienda. I confini delle particelle, che prima erano conservati solo nel browser, si importano con **Importa particelle precedenti**, usando lo stesso browser e l’origine del vecchio avvio. Le copie precedenti vengono conservate.
+Per ripristinare l’accesso con account, riavviare il servizio usando `bash 'Avvia AgroPlan.command' --require-password`. In questa modalità il primo account si crea con un collegamento locale riservato e una password scelta dal proprietario. Il deploy Render mantiene l’autenticazione.
+
+Se il vecchio database contiene dati, viene creato un backup verificato **prima** della migrazione in `backend/backups/`. Nell’uso locale senza password i record precedenti vengono associati all’azienda locale; in modalità con account l’associazione viene scelta esplicitamente nel primo accesso. I confini delle particelle, che prima erano conservati solo nel browser, si importano con **Importa particelle precedenti**, usando lo stesso browser e l’origine del vecchio avvio. Le copie precedenti vengono conservate.
 
 Il precedente `backend/start_mac.sh` ora avvia lo stesso percorso completo. Per cambiare porta:
 
@@ -49,7 +51,7 @@ Il secondo comando usa un database temporaneo e servizi esterni reali: verifica 
 
 Le particelle sono conservate sul server e in una cache locale separata per **server e azienda**. Le modifiche offline vengono ritentate con **Sincronizza**. Le revisioni impediscono sovrascritture silenziose tra dispositivi: l’app chiede quale versione conservare. Le cancellazioni lasciano una tombstone; le analisi offline hanno identificativi che impediscono duplicati se una risposta va persa.
 
-Le sessioni durano 8 ore; il token rimane solo in memoria. Al riavvio si accede nuovamente. Uscire revoca la sessione quando il server è raggiungibile. Le copie locali rimangono sul dispositivo per il recupero offline: usare un profilo dispositivo riservato alle persone autorizzate.
+In modalità con account, le sessioni durano 8 ore; il token rimane solo in memoria. Al riavvio si accede nuovamente. Uscire revoca la sessione quando il server è raggiungibile. Le copie locali rimangono sul dispositivo per il recupero offline: usare un profilo dispositivo riservato alle persone autorizzate.
 
 Gli altri account sono creati dal responsabile. Usare lo stesso identificativo azienda solo quando si vuole condividere intenzionalmente l’accesso ai dati:
 

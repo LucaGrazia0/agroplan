@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from pwdlib import PasswordHash
 
 from storage import connect
+from local_access import request_allowed
 
 router = APIRouter(prefix='/auth', tags=['Accesso'])
 password_hash = PasswordHash.recommended()
@@ -29,7 +30,10 @@ def digest(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def require_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]):
+def require_user(request: Request, credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]):
+    if request_allowed(request):
+        import os
+        return User('locale', os.getenv('AGROPLAN_LOCAL_FARM_ID', 'azienda-locale'))
     if credentials is not None:
         with connect() as db:
             row = db.execute('''SELECT u.username,u.farm_id FROM auth_sessions s
@@ -104,7 +108,7 @@ def me(user: CurrentUser):
 
 @router.post('/logout', status_code=204)
 def logout(request: Request, user: CurrentUser):
-    token = request.headers['authorization'].split(' ', 1)[1]
+    token = request.headers.get('authorization', '').partition(' ')[2]
     with connect() as db:
         db.execute('DELETE FROM auth_sessions WHERE token_hash=?', (digest(token),))
 
@@ -118,8 +122,12 @@ class SetupAccount(BaseModel):
 
 
 @router.get('/status')
-def account_status():
+def account_status(request: Request):
     import os
+    if request_allowed(request):
+        return {'local_mode': True, 'user': {'username': 'Uso locale',
+                'farm_id': os.getenv('AGROPLAN_LOCAL_FARM_ID', 'azienda-locale')},
+                'setup_required': False, 'setup_enabled': False, 'legacy_available': False}
     with connect() as db:
         empty = db.execute('SELECT 1 FROM auth_users LIMIT 1').fetchone() is None
         legacy = db.execute("SELECT 1 FROM agr_parcels WHERE farm_id='__legacy__' LIMIT 1").fetchone() is not None

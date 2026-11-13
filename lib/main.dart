@@ -1246,11 +1246,12 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
             onPressed: syncing ? null : syncParcels,
             icon: const Icon(Icons.sync),
           ),
-          IconButton(
-            tooltip: 'Esci (${ApiSession.instance.username})',
-            onPressed: ApiSession.instance.logout,
-            icon: const Icon(Icons.logout),
-          ),
+          if (!ApiSession.instance.localAccess)
+            IconButton(
+              tooltip: 'Esci (${ApiSession.instance.username})',
+              onPressed: ApiSession.instance.logout,
+              icon: const Icon(Icons.logout),
+            ),
           if (!wide)
             Builder(
               builder: (context) => IconButton(
