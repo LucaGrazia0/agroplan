@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as transport;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 export 'package:http/http.dart' show Response, ClientException;
 
 String resolveApiBaseUrl(String configured, Uri page, {required bool isWeb}) {
@@ -83,7 +84,65 @@ class ApiSession extends ChangeNotifier {
   String? username;
   String? farmId;
   bool localAccess = false;
+  bool pairedDevice = false;
+  static const _secureStorage = FlutterSecureStorage();
+  String get _deviceKey => 'agroplan_device_${Uri.encodeComponent(apiBaseUrl)}';
   bool get authenticated => _token != null || localAccess;
+
+  Future<void> restorePairedDevice() async {
+    if (kIsWeb) return;
+    try {
+      final saved = await _secureStorage.read(key: _deviceKey);
+      if (saved == null) return;
+      final data = jsonDecode(saved) as Map<String, dynamic>;
+      if (data['server'] != apiBaseUrl ||
+          (data['expires_at'] as num) <=
+              DateTime.now().millisecondsSinceEpoch) {
+        await _secureStorage.delete(key: _deviceKey);
+        return;
+      }
+      _token = data['token'] as String;
+      username = data['username'] as String;
+      farmId = data['farm_id'] as String;
+      pairedDevice = true;
+    } catch (_) {
+      // A locked/unavailable Keychain does not expose or replace credentials.
+    }
+  }
+
+  Future<void> pairDevice(String code) async {
+    final response = await _client
+        .post(
+          Uri.parse('$apiBaseUrl/auth/pair'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'code': code.trim()}),
+        )
+        .timeout(const Duration(seconds: 75));
+    if (response.statusCode != 200) {
+      throw Exception('Codice non valido, scaduto o già usato.');
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (!kIsWeb) {
+      await _secureStorage.write(
+        key: _deviceKey,
+        value: jsonEncode({
+          'server': apiBaseUrl,
+          'token': data['access_token'],
+          'username': data['user']['username'],
+          'farm_id': data['user']['farm_id'],
+          'expires_at':
+              DateTime.now().millisecondsSinceEpoch +
+              (data['expires_in'] as int) * 1000,
+        }),
+      );
+    }
+    _token = data['access_token'] as String;
+    username = data['user']['username'] as String;
+    farmId = data['user']['farm_id'] as String;
+    pairedDevice = true;
+    localAccess = false;
+    notifyListeners();
+  }
 
   Future<void> login(String username, String password) async {
     final response = await _client
@@ -113,7 +172,7 @@ class ApiSession extends ChangeNotifier {
   Future<Map<String, dynamic>> accountStatus() async {
     final response = await _client
         .get(Uri.parse('$apiBaseUrl/auth/status'))
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 75));
     if (response.statusCode != 200) throw Exception('Server non raggiungibile');
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     if (data['local_mode'] == true) {
@@ -177,6 +236,10 @@ class ApiSession extends ChangeNotifier {
 
   void clear() {
     if (_token == null && !localAccess) return;
+    if (pairedDevice && !kIsWeb) {
+      _secureStorage.delete(key: _deviceKey).catchError((_) {});
+    }
+    pairedDevice = false;
     localAccess = false;
     _token = null;
     username = null;

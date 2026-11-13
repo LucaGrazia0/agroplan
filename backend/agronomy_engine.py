@@ -20,6 +20,7 @@ class AgronomyRequest(BaseModel):
     longitude: float = Field(ge=6, le=19)
     season: Optional[str] = None
     history_days: int = Field(default=60, ge=30, le=180)
+    include_satellite: bool = False
 
 
 def finite(value):
@@ -213,26 +214,41 @@ def build_indicators(weather, crop):
     }
 
 
-def register_agronomy_routes(app, weather_handler, weather_request_class):
+def register_agronomy_routes(app, weather_handler, weather_request_class, satellite_handler=None):
+    @router.get('/overview')
+    def overview(user: CurrentUser):
+        from crop_analysis import farm_overview
+        return farm_overview(user)
+
     @router.post("/analyze")
     async def analyze(req: AgronomyRequest, user: CurrentUser):
-        require_parcel(req.parcel_id, user)
+        parcel = require_parcel(req.parcel_id, user)
         crop = crop_context(req.parcel_id, req.season)
-
-        weather = await weather_handler(
-            weather_request_class(
-                latitude=req.latitude,
-                longitude=req.longitude,
-                history_days=req.history_days,
+        import json
+        payload = json.loads(parcel['payload']) if parcel['payload'] else {}
+        points = payload.get('points', [])
+        latitude = sum(p['lat'] for p in points)/len(points) if points else req.latitude
+        longitude = sum(p['lng'] for p in points)/len(points) if points else req.longitude
+        try:
+            weather = await weather_handler(
+                weather_request_class(latitude=latitude, longitude=longitude, history_days=req.history_days)
             )
-        )
-
-        result = build_indicators(weather, crop)
-
+            result = build_indicators(weather, crop)
+        except HTTPException:
+            result = {'crop_context': crop, 'windows': {}, 'monitoring_alerts': [],
+                      'warnings': ['Meteo non disponibile: la sintesi usa solo i record salvati.'], 'source': 'Record aziendali'}
+        from crop_analysis import saved_context, build_crop_review
+        if req.include_satellite and satellite_handler and points:
+            try:
+                await satellite_handler(req.parcel_id, points)
+            except HTTPException:
+                result['warnings'].append('Aggiornamento satellitare non disponibile: mantengo le osservazioni salvate.')
+        soil, satellite = saved_context(req.parcel_id)
+        result['crop_review'] = build_crop_review(crop, soil, satellite, result['windows'], bool(points))
         return {
             "parcel_id": req.parcel_id,
-            "latitude": req.latitude,
-            "longitude": req.longitude,
+            "latitude": latitude,
+            "longitude": longitude,
             **result,
         }
 

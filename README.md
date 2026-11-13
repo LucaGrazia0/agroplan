@@ -26,7 +26,7 @@ bash 'Avvia AgroPlan.command' --port 8092
 
 ## IPA per iPhone e iPad
 
-Il workflow **AgroPlan IPA** compila su macOS con Xcode e produce l’artefatto **AgroPlan-IPA**, contenente `AgroPlan.ipa`, peso effettivo e checksum. È una build **Release arm64 non firmata** per iLoader/AltStore: la firma e l’installazione avvengono con lo strumento scelto. Non è una distribuzione TestFlight. Il primo avvio permette di scegliere un server AgroPlan HTTPS; l’indirizzo viene conservato sul dispositivo e si può cambiare con **Configura server** nella schermata di accesso. Il launcher senza password del Mac resta limitato al Mac: `localhost` sull’iPhone indica il telefono.
+Il workflow **AgroPlan IPA** compila su macOS con Xcode e produce l’artefatto **AgroPlan-IPA**, contenente `AgroPlan.ipa`, peso effettivo e checksum. È una build **Release arm64 non firmata** per SideStore/iLoader/AltStore: la firma e l’installazione avvengono con lo strumento scelto. Non è una distribuzione TestFlight. Il primo avvio permette di scegliere un server AgroPlan HTTPS; l’indirizzo viene conservato sul dispositivo e si può cambiare con **Configura server** nella schermata di accesso. Il launcher senza password del Mac resta limitato al Mac: `localhost` sull’iPhone indica il telefono.
 
 Per ridurre il peso vengono usati tree shaking delle icone, simboli Dart separati e compressione ZIP massima. I simboli sono conservati nell’artefatto separato **AgroPlan-debug-symbols**; non vengono inclusi nell’IPA. L’app non contiene runtime Python, database del Mac o credenziali dei servizi. Il backend deve essere attivo e raggiungibile per usare le integrazioni.
 
@@ -84,9 +84,9 @@ L’ultimo comando assegna i record precedenti ancora privi di proprietario: usa
 
 `render.yaml` ora compila **anche il frontend** tramite `scripts/render_build.sh`, avvia le API dalla radice del repository e serve l’app allo stesso URL. Le risorse grafiche Flutter vengono incluse nel bundle. La build web non contiene indirizzi localhost o URL segnaposto: usa l’origine da cui è stata aperta.
 
-La configurazione propone un servizio **Starter con disco persistente da 1 GB**, montato in `/var/data`, e `AGROPLAN_DB_PATH=/var/data/agroplan.db`. **Richiede un piano a pagamento**: verificarne i costi prima di applicarla. Non viene attivato alcun piano dal codice. [Persistenza Render](https://render.com/docs/disks), [directory del servizio Render](https://render.com/docs/monorepo-support).
+Il servizio esistente è **https://agroplan-backend.onrender.com**, piano **Free**. Il backend mobile si compila senza Flutter su Render. `render.yaml` usa un database PostgreSQL **Free** separato tramite `DATABASE_URL`: il filesystem del web service non conserva i dati ai riavvii. Il database gratuito di questa prova scade il **13 dicembre 2026**: esportare i dati prima della scadenza. Nessun piano a pagamento è configurato. Le credenziali Copernicus e del database restano solo nel backend.
 
-Per un servizio esistente: trasferire il vecchio database sul disco prima di cambiare percorso, impostare le due credenziali Copernicus nel dashboard e creare gli account dalla shell del servizio con `python backend/manage.py`. I dati precedenti restano riservati fino all’assegnazione esplicita. Il codice di primo avvio locale non viene trasferito alla produzione. Un eventuale primo avvio remoto richiede un `AGROPLAN_SETUP_TOKEN` casuale di almeno 32 caratteri, configurato esplicitamente dall’operatore e poi rimosso dopo l’attivazione.
+Per iPhone è disponibile un abbinamento monouso, emesso dall’amministratore e valido per 7 giorni. Il codice viene scambiato con una sessione di 90 giorni, conservata nel Portachiavi e revocabile con Esci o disabilitando l’account. Il codice e la sessione non sono inclusi nell’IPA; non inviarli in chat. Il Mac mantiene l’accesso locale senza password.
 
 Il frontend servito dalle API non richiede CORS aggiuntivo. Per un client web su un’origine diversa impostare `CORS_ORIGINS`; per client nativi scegliere il server HTTPS nell’app oppure preconfigurarlo durante la compilazione tramite `--dart-define=AGROPLAN_API_URL=...`.
 
@@ -131,3 +131,9 @@ La CI esegue test backend offline, analisi e test Flutter, e build web. Non usa 
 - Gli avvisi non diagnosticano malattie o carenze e non prescrivono irrigazioni, trattamenti o concimazioni.
 
 La sorgente attiva è in `lib/`. Copie storiche, ambienti, build, database, collegamenti di attivazione e credenziali sono esclusi dal repository.
+
+## Analisi colturale
+
+Il pulsante **Analisi colturale aziendale** riepiloga i record di tutte le particelle dell’azienda, incluse quelle prive di confini da recuperare. La scheda della particella integra ciclo e BBCH, copertura dei dati, ultimo campione del suolo e indicatori meteo. L’opzione **Aggiorna anche i dati satellitari** richiede fino a tre acquisizioni recenti e conserva i risultati per dodici ore, invalidandoli se cambiano i confini. Il confronto NDVI richiede due date distinte, entro 45 giorni, con almeno il 50% di pixel validi. Le variazioni non sono diagnosi di malattie o stime di resa. Senza meteo il servizio mantiene la sintesi dei record salvati e segnala il dato mancante.
+
+La sintesi non propone dosi irrigue o di fertilizzanti sulla base del solo NDVI o del bilancio pioggia–ET₀. [FAO 56](https://www.fao.org/4/x0490e/x0490e0a.htm). La compilazione IPA viene eseguita solo dopo il superamento dei test dell’analisi.

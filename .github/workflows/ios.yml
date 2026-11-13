@@ -14,7 +14,17 @@ concurrency:
   group: ios-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r backend/requirements-dev.txt
+      - run: python -m pytest -q
   ipa:
+    needs: analysis
     runs-on: macos-26
     timeout-minutes: 25
     steps:
@@ -25,7 +35,7 @@ jobs:
           channel: stable
           cache: true
       - name: Build compact Release IPA
-        run: python3 scripts/build_ios.py
+        run: python3 scripts/build_ios.py --api-url https://agroplan-backend.onrender.com
       - name: Record package size
         run: |
           python3 - <<'PY'

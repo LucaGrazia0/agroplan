@@ -18,12 +18,14 @@ import 'api.dart';
 import 'login_page.dart';
 import 'integrations_dialog.dart';
 import 'satellite_scenes.dart';
+import 'crop_overview.dart';
 
 part 'parcel_sync.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await restoreNativeServer();
+  await ApiSession.instance.restorePairedDevice();
   runApp(const AgroPlanApp());
 }
 
@@ -1249,6 +1251,14 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
             tooltip: 'Sincronizza particelle',
             onPressed: syncing ? null : syncParcels,
             icon: const Icon(Icons.sync),
+          ),
+          IconButton(
+            tooltip: 'Analisi colturale aziendale',
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (_) => const CropOverview(),
+            ),
+            icon: const Icon(Icons.analytics_outlined),
           ),
           if (!ApiSession.instance.localAccess)
             IconButton(

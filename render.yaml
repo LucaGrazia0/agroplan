@@ -1,23 +1,25 @@
-# Richiede servizio e disco a pagamento. Applicare dal dashboard solo dopo
-# aver verificato i costi. Questo file non esegue alcun deploy da solo.
+# Prova gratuita: il database Free scade dopo 30 giorni. Esportare i dati
+# prima della scadenza; nessun upgrade a pagamento viene configurato.
 services:
   - type: web
     name: agroplan-backend
     runtime: python
-    plan: starter
-    buildCommand: bash scripts/render_build.sh
+    plan: free
+    buildCommand: pip install -r backend/requirements-lock.txt
     startCommand: uvicorn main:app --app-dir backend --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
-    disk:
-      name: agroplan-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.15
-      - key: AGROPLAN_DB_PATH
-        value: /var/data/agroplan.db
+      - key: DATABASE_URL
+        fromDatabase:
+          name: agroplan-data-free
+          property: connectionString
       - key: COPERNICUS_CLIENT_ID
         sync: false
       - key: COPERNICUS_CLIENT_SECRET
         sync: false
+databases:
+  - name: agroplan-data-free
+    plan: free
+    databaseName: agroplan

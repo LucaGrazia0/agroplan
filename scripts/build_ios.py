@@ -71,7 +71,7 @@ def main():
     (output / 'AgroPlan-build.json').write_text(json.dumps(report, indent=2) + '\n')
     (output / 'LEGGIMI.txt').write_text(
         'AgroPlan per iPhone/iPad — build Release arm64\n\n'
-        'IPA non firmata: usare iLoader/AltStore o uno strumento equivalente per firmarla e installarla.\n'
+        'IPA non firmata: usare SideStore/iLoader/AltStore o uno strumento equivalente per firmarla e installarla.\n'
         'Non è un pacchetto firmato per TestFlight o App Store.\n'
         'Al primo avvio configura un server AgroPlan HTTPS raggiungibile dal telefono.\n'
         'Il server Python e le credenziali dei provider non sono inclusi nell’app.\n'

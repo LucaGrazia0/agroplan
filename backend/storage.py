@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
+from postgres_storage import database_url
 
 load_dotenv(Path(__file__).with_name('.env'))
 DB = Path(os.getenv('AGROPLAN_DB_PATH', str(Path(__file__).with_name('agroplan.db'))))
@@ -12,6 +13,15 @@ DB = Path(os.getenv('AGROPLAN_DB_PATH', str(Path(__file__).with_name('agroplan.d
 
 @contextmanager
 def connect():
+    if database_url():
+        from postgres_storage import Connection
+        conn = Connection(database_url())
+        try:
+            with conn.raw.transaction():
+                yield conn
+        finally:
+            conn.close()
+        return
     DB.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB, timeout=15)
     conn.row_factory = sqlite3.Row
@@ -24,6 +34,8 @@ def connect():
 
 
 def backup_before_first_migration():
+    if database_url():
+        return
     if not DB.is_file():
         return
     from contextlib import closing
@@ -48,7 +60,8 @@ def backup_before_first_migration():
 def initialize():
     backup_before_first_migration()
     with connect() as db:
-        db.execute('PRAGMA journal_mode=WAL')
+        if not database_url():
+            db.execute('PRAGMA journal_mode=WAL')
         db.executescript('''
             CREATE TABLE IF NOT EXISTS agr_crop_cycles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, parcel_id TEXT NOT NULL,
@@ -79,8 +92,18 @@ def initialize():
             CREATE INDEX IF NOT EXISTS idx_parcels_farm ON agr_parcels(farm_id);
             CREATE INDEX IF NOT EXISTS idx_bbch_cycle_date ON agr_bbch_observations(cycle_id, observed_at);
             CREATE INDEX IF NOT EXISTS idx_soil_parcel_date ON agr_soil_analyses(parcel_id, sample_date);
+            CREATE TABLE IF NOT EXISTS agr_satellite_observations (
+                parcel_id TEXT NOT NULL, observed_at TEXT NOT NULL,
+                mean REAL, valid_percent REAL, fetched_at TEXT NOT NULL,
+                geometry_hash TEXT NOT NULL,
+                PRIMARY KEY(parcel_id, observed_at));
+            CREATE TABLE IF NOT EXISTS auth_pairings (
+                code_hash TEXT PRIMARY KEY, username TEXT NOT NULL,
+                expires_at REAL NOT NULL,
+                FOREIGN KEY(username) REFERENCES auth_users(username) ON DELETE CASCADE);
         ''')
-        columns = {r[1] for r in db.execute('PRAGMA table_info(agr_soil_analyses)')}
+        columns = ({r[0] for r in db.execute("SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='agr_soil_analyses'")}
+                   if database_url() else {r[1] for r in db.execute('PRAGMA table_info(agr_soil_analyses)')})
         if 'client_id' not in columns:
             db.execute('ALTER TABLE agr_soil_analyses ADD COLUMN client_id TEXT')
         db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_soil_idempotency ON agr_soil_analyses(parcel_id,client_id)')
@@ -90,4 +113,5 @@ def initialize():
             SELECT parcel_id, '__legacy__' FROM agr_crop_cycles
             UNION SELECT parcel_id, '__legacy__' FROM agr_soil_analyses''')
 
-    DB.chmod(0o600)
+    if not database_url():
+        DB.chmod(0o600)

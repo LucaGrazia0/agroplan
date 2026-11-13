@@ -772,7 +772,32 @@ register_crop_routes(app)
 app.include_router(soil_router)
 
 from agronomy_engine import register_agronomy_routes
-register_agronomy_routes(app, parcel_weather, WeatherRequest)
+
+async def refresh_crop_satellite(parcel_id, points):
+    from crop_analysis import geometry_hash
+    from storage import connect
+    from datetime import datetime, timezone
+    fingerprint = geometry_hash(points)
+    now = datetime.now(timezone.utc)
+    with connect() as db:
+        cached = db.execute('SELECT fetched_at FROM agr_satellite_observations WHERE parcel_id=? AND geometry_hash=? ORDER BY fetched_at DESC LIMIT 1', (parcel_id, fingerprint)).fetchone()
+    if cached and (now-datetime.fromisoformat(cached['fetched_at'])).total_seconds() < 43200:
+        return
+    ring = [[p['lng'], p['lat']] for p in points]
+    if ring[0] != ring[-1]: ring.append(ring[0])
+    geometry = {'type':'Polygon', 'coordinates':[ring]}
+    today = DateType.today()
+    available = await scenes(ScenesRequest(geometry=geometry, start_date=today-timedelta(days=45), end_date=today, limit=100))
+    days = sorted({DateType.fromisoformat(item['datetime'][:10]) for item in available['scenes'] if item.get('datetime')}, reverse=True)[:3]
+    for day in days:
+        observation = await parcel_stats_for_date(ParcelTimeSeriesRequest(geometry=geometry, dates=[day], max_cloud_coverage=100), day)
+        with connect() as db:
+            db.execute('''INSERT INTO agr_satellite_observations(parcel_id,observed_at,mean,valid_percent,fetched_at,geometry_hash)
+                VALUES(?,?,?,?,?,?) ON CONFLICT(parcel_id,observed_at) DO UPDATE SET
+                mean=excluded.mean,valid_percent=excluded.valid_percent,fetched_at=excluded.fetched_at,geometry_hash=excluded.geometry_hash''',
+                (parcel_id,day.isoformat(),observation['mean'],observation.get('valid_percent'),now.isoformat(),fingerprint))
+
+register_agronomy_routes(app, parcel_weather, WeatherRequest, refresh_crop_satellite)
 
 
 from integrations import register_integration_routes

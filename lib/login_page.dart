@@ -22,6 +22,8 @@ class _LoginPageState extends State<LoginPage> {
   final farm = TextEditingController(text: 'azienda-locale');
   final setupToken = TextEditingController();
   final server = TextEditingController();
+  final pairingCode = TextEditingController();
+  bool pairingAvailable = false;
   bool configuringServer = false;
   bool busy = false;
   bool checking = true;
@@ -86,6 +88,7 @@ class _LoginPageState extends State<LoginPage> {
         setupRequired = status['setup_required'] == true;
         setupEnabled = status['setup_enabled'] == true;
         legacyAvailable = status['legacy_available'] == true;
+        pairingAvailable = status['pairing_available'] == true;
         checking = false;
         error = null;
       });
@@ -107,6 +110,7 @@ class _LoginPageState extends State<LoginPage> {
     farm.dispose();
     setupToken.dispose();
     server.dispose();
+    pairingCode.dispose();
     super.dispose();
   }
 
@@ -211,6 +215,81 @@ class _LoginPageState extends State<LoginPage> {
               SizedBox(height: 16),
               Text('Apertura AgroPlan…'),
             ],
+          ),
+        ),
+      );
+    }
+    if (pairingAvailable) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('AgroPlan')),
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: SizedBox(
+              width: 400,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Abbina questo dispositivo',
+                    style: TextStyle(fontSize: 24),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Incolla il codice riservato una sola volta. Su iPhone l’accesso resta nel Portachiavi: alle aperture successive non serve una password.',
+                  ),
+                  TextField(
+                    controller: pairingCode,
+                    obscureText: true,
+                    autocorrect: false,
+                    enabled: !busy,
+                    decoration: const InputDecoration(
+                      labelText: 'Codice di abbinamento',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (error != null)
+                    Text(error!, style: const TextStyle(color: Colors.red)),
+                  FilledButton(
+                    onPressed: busy
+                        ? null
+                        : () async {
+                            setState(() {
+                              busy = true;
+                              error = null;
+                            });
+                            try {
+                              await ApiSession.instance.pairDevice(
+                                pairingCode.text,
+                              );
+                            } catch (_) {
+                              if (mounted) {
+                                setState(
+                                  () => error = 'Abbinamento non riuscito. Controlla il codice e il collegamento.',
+                                );
+                              }
+                            } finally {
+                              if (mounted) setState(() => busy = false);
+                            }
+                          },
+                    child: Text(busy ? 'Abbinamento…' : 'Abbina e apri'),
+                  ),
+                  TextButton(
+                    onPressed: busy
+                        ? null
+                        : () => setState(() => pairingAvailable = false),
+                    child: const Text('Accesso con account'),
+                  ),
+                  if (!kIsWeb)
+                    TextButton(
+                      onPressed: busy
+                          ? null
+                          : () => setState(() => configuringServer = true),
+                      child: const Text('Configura server'),
+                    ),
+                ],
+              ),
+            ),
           ),
         ),
       );

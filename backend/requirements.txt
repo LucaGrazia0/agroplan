@@ -6,3 +6,5 @@ pydantic>=2,<3
 Pillow>=10,<13
 
 pwdlib[argon2]>=0.2,<1
+psycopg[binary]>=3.3,<4
+psycopg-pool>=3.3,<4

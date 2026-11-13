@@ -29,6 +29,7 @@ class _AgronomyPanelState extends State<AgronomyPanel> {
   bool loading = false;
   String? error;
   int requestVersion = 0;
+  bool includeSatellite = false;
 
   static const cropNames = {
     'frumento_tenero': 'Frumento tenero',
@@ -80,6 +81,7 @@ class _AgronomyPanelState extends State<AgronomyPanel> {
               'latitude': widget.latitude,
               'longitude': widget.longitude,
               'history_days': 60,
+              'include_satellite': includeSatellite,
             }),
           )
           .timeout(const Duration(seconds: 100));
@@ -292,6 +294,7 @@ class _AgronomyPanelState extends State<AgronomyPanel> {
     final warningList = warnings is List ? warnings : [];
     final monitoring = data?['monitoring_alerts'];
     final monitoringList = monitoring is List ? monitoring : [];
+    final review = data?['crop_review'];
 
     return Card(
       child: Padding(
@@ -303,7 +306,7 @@ class _AgronomyPanelState extends State<AgronomyPanel> {
               children: [
                 const Expanded(
                   child: Text(
-                    'Analisi agronomica',
+                    'Analisi colturale',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -316,14 +319,26 @@ class _AgronomyPanelState extends State<AgronomyPanel> {
             ),
             const SizedBox(height: 6),
             const Text(
-              'Monitoraggio climatico per colture cerealicole',
+              'Coltura, BBCH, meteo, suolo e osservazioni satellitari disponibili',
               style: TextStyle(fontSize: 12),
+            ),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Aggiorna anche i dati satellitari'),
+              subtitle: const Text(
+                'Fino a 3 acquisizioni recenti; usa la quota Copernicus del server.',
+              ),
+              value: includeSatellite,
+              onChanged: loading
+                  ? null
+                  : (value) =>
+                        setState(() => includeSatellite = value ?? false),
             ),
             if (loading) ...[
               const SizedBox(height: 12),
               const LinearProgressIndicator(),
               const SizedBox(height: 8),
-              const Text('Elaborazione dei dati meteorologici...'),
+              const Text('Analisi dei dati disponibili…'),
             ],
             if (error != null) ...[
               const SizedBox(height: 10),
@@ -334,6 +349,31 @@ class _AgronomyPanelState extends State<AgronomyPanel> {
               TextButton(onPressed: load, child: const Text('Riprova')),
             ],
             if (data != null) ...[
+              if (review is Map) ...[
+                const Divider(height: 24),
+                Text('${review['summary']}'),
+                for (final check in (review['checks'] as List? ?? []))
+                  if (check is Map)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('${check['title']}'),
+                      subtitle: Text(
+                        '${check['evidence']}\n${check['action']}',
+                      ),
+                    ),
+                if ((review['missing_data'] as List? ?? []).isNotEmpty)
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: const Text('Dati da completare'),
+                    children: [
+                      for (final gap in review['missing_data'] as List)
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('$gap'),
+                        ),
+                    ],
+                  ),
+              ],
               const Divider(height: 24),
               Text(
                 'Coltura: ${cropNames[cropMap?['crop']] ?? 'Non registrata'}',

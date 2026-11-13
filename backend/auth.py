@@ -113,6 +113,28 @@ def logout(request: Request, user: CurrentUser):
         db.execute('DELETE FROM auth_sessions WHERE token_hash=?', (digest(token),))
 
 
+class PairDevice(BaseModel):
+    code: str = Field(min_length=32, max_length=200)
+
+
+@router.post('/pair')
+def pair_device(item: PairDevice):
+    now = time.time()
+    token = secrets.token_urlsafe(32)
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute('''SELECT u.username,u.farm_id FROM auth_pairings p
+            JOIN auth_users u ON p.username=u.username
+            WHERE p.code_hash=? AND p.expires_at>? AND u.disabled=0''', (digest(item.code), now)).fetchone()
+        if row is None:
+            raise HTTPException(401, 'Codice di abbinamento non valido o già utilizzato.')
+        db.execute('DELETE FROM auth_pairings WHERE code_hash=?', (digest(item.code),))
+        seconds = 90 * 24 * 60 * 60
+        db.execute('INSERT INTO auth_sessions VALUES(?,?,?)', (digest(token), row['username'], now + seconds))
+    return {'access_token': token, 'token_type': 'bearer', 'expires_in': seconds,
+            'user': {'username': row['username'], 'farm_id': row['farm_id']}}
+
+
 class SetupAccount(BaseModel):
     username: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=12, max_length=1024)
@@ -131,8 +153,9 @@ def account_status(request: Request):
     with connect() as db:
         empty = db.execute('SELECT 1 FROM auth_users LIMIT 1').fetchone() is None
         legacy = db.execute("SELECT 1 FROM agr_parcels WHERE farm_id='__legacy__' LIMIT 1").fetchone() is not None
+        pairing = db.execute('SELECT 1 FROM auth_pairings WHERE expires_at>? LIMIT 1', (time.time(),)).fetchone() is not None
     return {'setup_required': empty, 'setup_enabled': empty and len(os.getenv('AGROPLAN_SETUP_TOKEN', '')) >= 32,
-            'legacy_available': empty and legacy}
+            'legacy_available': empty and legacy, 'pairing_available': pairing}
 
 
 @router.post('/setup', status_code=201)
