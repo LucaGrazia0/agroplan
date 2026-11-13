@@ -21,7 +21,11 @@ import 'satellite_scenes.dart';
 
 part 'parcel_sync.dart';
 
-void main() => runApp(const AgroPlanApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await restoreNativeServer();
+  runApp(const AgroPlanApp());
+}
 
 class AgroPlanApp extends StatelessWidget {
   const AgroPlanApp({super.key});
@@ -38,7 +42,7 @@ class AgroPlanApp extends StatelessWidget {
       listenable: ApiSession.instance,
       builder: (context, _) => ApiSession.instance.authenticated
           ? AgroPlanHome(key: ValueKey(ApiSession.instance.farmId))
-          : const LoginPage(),
+          : LoginPage(configureServerOnStart: !nativeServerConfigured),
     ),
   );
 }

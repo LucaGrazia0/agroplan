@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import 'api.dart';
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key, this.initialSetupToken});
+  const LoginPage({
+    super.key,
+    this.initialSetupToken,
+    this.configureServerOnStart = false,
+  });
   final String? initialSetupToken;
+  final bool configureServerOnStart;
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
@@ -15,6 +21,8 @@ class _LoginPageState extends State<LoginPage> {
   final confirmation = TextEditingController();
   final farm = TextEditingController(text: 'azienda-locale');
   final setupToken = TextEditingController();
+  final server = TextEditingController();
+  bool configuringServer = false;
   bool busy = false;
   bool checking = true;
   bool tokenFromLink = false;
@@ -33,7 +41,41 @@ class _LoginPageState extends State<LoginPage> {
         fragment?.queryParameters['setup_token'] ??
         '';
     tokenFromLink = setupToken.text.isNotEmpty;
-    checkServer();
+    configuringServer = widget.configureServerOnStart;
+    server.text = nativeServerConfigured ? apiBaseUrl : '';
+    if (configuringServer) {
+      checking = false;
+    } else {
+      checkServer();
+    }
+  }
+
+  Future<void> saveServer() async {
+    if (busy) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      await configureNativeServer(server.text);
+      if (!mounted) return;
+      setState(() {
+        configuringServer = false;
+        checking = true;
+      });
+      await checkServer();
+    } catch (e) {
+      if (mounted) {
+        setState(
+          () => error = e.toString().replaceFirst(
+            RegExp(r'^(FormatException|Exception): '),
+            '',
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 
   Future<void> checkServer() async {
@@ -64,6 +106,7 @@ class _LoginPageState extends State<LoginPage> {
     confirmation.dispose();
     farm.dispose();
     setupToken.dispose();
+    server.dispose();
     super.dispose();
   }
 
@@ -110,6 +153,54 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final creating = setupRequired && setupEnabled;
+    if (configuringServer) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('AgroPlan')),
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: SizedBox(
+              width: 400,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Icon(Icons.grass, size: 56, color: Color(0xFF32764A)),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Collega il tuo server',
+                    style: TextStyle(fontSize: 24),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Inserisci l’indirizzo del server AgroPlan raggiungibile da questo dispositivo. Il server e le integrazioni devono essere attivi.',
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: server,
+                    enabled: !busy,
+                    keyboardType: TextInputType.url,
+                    autocorrect: false,
+                    textInputAction: TextInputAction.go,
+                    onSubmitted: (_) => saveServer(),
+                    decoration: const InputDecoration(
+                      labelText: 'Indirizzo server',
+                      hintText: 'https://…',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (error != null)
+                    Text(error!, style: const TextStyle(color: Colors.red)),
+                  FilledButton(
+                    onPressed: busy ? null : saveServer,
+                    child: Text(busy ? 'Collegamento…' : 'Collega server'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     if (checking) {
       return const Scaffold(
         body: Center(
@@ -237,6 +328,16 @@ class _LoginPageState extends State<LoginPage> {
                   if (!creating)
                     const Text(
                       'Usa l’account fornito dal responsabile della tua azienda.',
+                    ),
+                  if (!kIsWeb)
+                    TextButton(
+                      onPressed: busy
+                          ? null
+                          : () => setState(() {
+                              configuringServer = true;
+                              error = null;
+                            }),
+                      child: const Text('Configura server'),
                     ),
                 ],
               ),

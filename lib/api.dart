@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as transport;
+import 'package:shared_preferences/shared_preferences.dart';
 export 'package:http/http.dart' show Response, ClientException;
 
 String resolveApiBaseUrl(String configured, Uri page, {required bool isWeb}) {
@@ -14,11 +15,59 @@ String resolveApiBaseUrl(String configured, Uri page, {required bool isWeb}) {
   return 'http://127.0.0.1:8091';
 }
 
-final apiBaseUrl = resolveApiBaseUrl(
-  const String.fromEnvironment('AGROPLAN_API_URL'),
-  Uri.base,
-  isWeb: kIsWeb,
-);
+const _compiledApiUrl = String.fromEnvironment('AGROPLAN_API_URL');
+String? _nativeApiUrl;
+bool get nativeServerConfigured =>
+    kIsWeb || _nativeApiUrl != null || _compiledApiUrl.trim().isNotEmpty;
+String get apiBaseUrl =>
+    _nativeApiUrl ??
+    resolveApiBaseUrl(_compiledApiUrl, Uri.base, isWeb: kIsWeb);
+
+String validateServerUrl(String value) {
+  final uri = Uri.tryParse(value.trim());
+  if (uri == null ||
+      uri.scheme != 'https' ||
+      uri.host.isEmpty ||
+      uri.userInfo.isNotEmpty ||
+      uri.hasQuery ||
+      uri.hasFragment) {
+    throw const FormatException(
+      'Inserisci l’indirizzo HTTPS del server AgroPlan.',
+    );
+  }
+  return uri.toString().replaceFirst(RegExp(r'/+$'), '');
+}
+
+Future<void> restoreNativeServer() async {
+  if (kIsWeb) return;
+  final saved = (await SharedPreferences.getInstance()).getString(
+    'agroplan_api_url',
+  );
+  if (saved != null) {
+    try {
+      _nativeApiUrl = validateServerUrl(saved);
+    } on FormatException {
+      /* Ask again. */
+    }
+  }
+}
+
+Future<void> configureNativeServer(String value) async {
+  if (kIsWeb) throw StateError('Il browser usa il proprio server.');
+  final validated = validateServerUrl(value);
+  final saved = await (await SharedPreferences.getInstance()).setString(
+    'agroplan_api_url',
+    validated,
+  );
+  if (!saved) throw Exception('Impossibile salvare il server. Riprova.');
+  ApiSession.instance.clear();
+  _nativeApiUrl = validated;
+}
+
+@visibleForTesting
+void resetNativeServerForTesting() {
+  _nativeApiUrl = null;
+}
 
 transport.Client _client = transport.Client();
 

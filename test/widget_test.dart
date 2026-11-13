@@ -17,17 +17,20 @@ void main() {
     ),
   );
   tearDown(() => useHttpClientForTesting(http.Client()));
-  testWidgets('La schermata iniziale richiede l’accesso all’azienda', (
+  testWidgets('La prima apertura nativa permette di configurare il server', (
     tester,
   ) async {
     await tester.pumpWidget(const AgroPlanApp());
     await tester.pumpAndSettle();
-    expect(find.text('Accedi alla tua azienda'), findsOneWidget);
-    expect(find.byType(TextField), findsNWidgets(2));
-    expect(find.text('Accedi'), findsOneWidget);
-    await tester.tap(find.text('Accedi'));
+    expect(find.text('Collega il tuo server'), findsOneWidget);
+    expect(find.byType(TextField), findsOneWidget);
+    expect(find.text('Password'), findsNothing);
+    await tester.tap(find.text('Collega server'));
     await tester.pump();
-    expect(find.text('Accedi alla tua azienda'), findsOneWidget);
+    expect(
+      find.text('Inserisci l’indirizzo HTTPS del server AgroPlan.'),
+      findsOneWidget,
+    );
     expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 

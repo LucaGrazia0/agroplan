@@ -24,6 +24,22 @@ Il precedente `backend/start_mac.sh` ora avvia lo stesso percorso completo. Per 
 bash 'Avvia AgroPlan.command' --port 8092
 ```
 
+## IPA per iPhone e iPad
+
+Il workflow **AgroPlan IPA** compila su macOS con Xcode e produce l’artefatto **AgroPlan-IPA**, contenente `AgroPlan.ipa`, peso effettivo e checksum. È una build **Release arm64 non firmata** per iLoader/AltStore: la firma e l’installazione avvengono con lo strumento scelto. Non è una distribuzione TestFlight. Il primo avvio permette di scegliere un server AgroPlan HTTPS; l’indirizzo viene conservato sul dispositivo e si può cambiare con **Configura server** nella schermata di accesso. Il launcher senza password del Mac resta limitato al Mac: `localhost` sull’iPhone indica il telefono.
+
+Per ridurre il peso vengono usati tree shaking delle icone, simboli Dart separati e compressione ZIP massima. I simboli sono conservati nell’artefatto separato **AgroPlan-debug-symbols**; non vengono inclusi nell’IPA. L’app non contiene runtime Python, database del Mac o credenziali dei servizi. Il backend deve essere attivo e raggiungibile per usare le integrazioni.
+
+Su un Mac con Xcode completo e Flutter installati:
+
+```sh
+python3 scripts/build_ios.py
+# Facoltativo: preconfigurare un server reale, invece di sceglierlo nell’app.
+python3 scripts/build_ios.py --api-url https://TUO-SERVER
+```
+
+Il risultato si trova in `build/ios/ipa/AgroPlan.ipa`. Il peso del file viene misurato dopo la compilazione; lo spazio occupato dopo l’installazione sarà maggiore.
+
 ## Credenziali e collegamenti
 
 Le credenziali Copernicus vanno solo in `backend/.env`, copiando `backend/.env.example` se il file non esiste. Non copiarle nel frontend. Le altre fonti configurate non richiedono chiavi nel client.
@@ -72,7 +88,7 @@ La configurazione propone un servizio **Starter con disco persistente da 1 GB**,
 
 Per un servizio esistente: trasferire il vecchio database sul disco prima di cambiare percorso, impostare le due credenziali Copernicus nel dashboard e creare gli account dalla shell del servizio con `python backend/manage.py`. I dati precedenti restano riservati fino all’assegnazione esplicita. Il codice di primo avvio locale non viene trasferito alla produzione. Un eventuale primo avvio remoto richiede un `AGROPLAN_SETUP_TOKEN` casuale di almeno 32 caratteri, configurato esplicitamente dall’operatore e poi rimosso dopo l’attivazione.
 
-Il frontend servito dalle API non richiede CORS aggiuntivo. Per un client web su un’origine diversa impostare `CORS_ORIGINS`; per client nativi compilare con l’URL HTTPS reale del backend tramite `--dart-define=AGROPLAN_API_URL=...`.
+Il frontend servito dalle API non richiede CORS aggiuntivo. Per un client web su un’origine diversa impostare `CORS_ORIGINS`; per client nativi scegliere il server HTTPS nell’app oppure preconfigurarlo durante la compilazione tramite `--dart-define=AGROPLAN_API_URL=...`.
 
 ## Backup e ripristino
 
