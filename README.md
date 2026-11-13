@@ -137,3 +137,17 @@ La sorgente attiva è in `lib/`. Copie storiche, ambienti, build, database, coll
 Il pulsante **Analisi colturale aziendale** riepiloga i record di tutte le particelle dell’azienda, incluse quelle prive di confini da recuperare. La scheda della particella integra ciclo e BBCH, copertura dei dati, ultimo campione del suolo e indicatori meteo. L’opzione **Aggiorna anche i dati satellitari** richiede fino a tre acquisizioni recenti e conserva i risultati per dodici ore, invalidandoli se cambiano i confini. Il confronto NDVI richiede due date distinte, entro 45 giorni, con almeno il 50% di pixel validi. Le variazioni non sono diagnosi di malattie o stime di resa. Senza meteo il servizio mantiene la sintesi dei record salvati e segnala il dato mancante.
 
 La sintesi non propone dosi irrigue o di fertilizzanti sulla base del solo NDVI o del bilancio pioggia–ET₀. [FAO 56](https://www.fao.org/4/x0490e/x0490e0a.htm). La compilazione IPA viene eseguita solo dopo il superamento dei test dell’analisi.
+
+## Connessione iPhone e ripristino
+
+La versione 1.1.1 verifica che `/auth/status` esista prima di proporre qualsiasi accesso. Se Render non è ancora aggiornato o è offline, mostra un messaggio specifico e permette di riprovare; non presenta un modulo password inutile. Sul client nativo la prima scelta è l’abbinamento monouso. L’accesso con account resta una scelta esplicita.
+
+L’amministratore può migrare una copia SQLite in un database PostgreSQL vuoto e generare un codice locale riservato con `backend/transfer.py`. Il comando rifiuta una destinazione con dati o account esistenti, verifica il backup SQLite e conserva gli identificativi e le sequenze. `DATABASE_URL` deve essere configurato solo nell’ambiente backend, mai negli argomenti o nel client.
+
+```sh
+python backend/transfer.py migrate --source backend/agroplan.db --farm azienda-locale --owner proprietario --backup .local/backups/pre-cloud.sqlite
+python backend/transfer.py pair-device --owner proprietario --output .local/abbinamento-iphone.txt
+python backend/transfer.py backup --output .local/backups/cloud.json
+```
+
+Il codice va copiato dal file privato nel campo **Codice di abbinamento** dell’iPhone una sola volta. Non inserirlo in chat. Per PostgreSQL usare il backup JSON di `transfer.py`; il comando `manage.py backup` è riservato a SQLite.

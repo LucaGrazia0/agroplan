@@ -24,6 +24,8 @@ class _LoginPageState extends State<LoginPage> {
   final server = TextEditingController();
   final pairingCode = TextEditingController();
   bool pairingAvailable = false;
+  bool serverReady = false;
+  bool accountLoginRequested = false;
   bool configuringServer = false;
   bool busy = false;
   bool checking = true;
@@ -81,6 +83,13 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> checkServer() async {
+    if (mounted) {
+      setState(() {
+        checking = true;
+        serverReady = false;
+        error = null;
+      });
+    }
     try {
       final status = await ApiSession.instance.accountStatus();
       if (!mounted) return;
@@ -89,14 +98,16 @@ class _LoginPageState extends State<LoginPage> {
         setupEnabled = status['setup_enabled'] == true;
         legacyAvailable = status['legacy_available'] == true;
         pairingAvailable = status['pairing_available'] == true;
+        serverReady = true;
         checking = false;
         error = null;
       });
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         setState(() {
           checking = false;
-          error = 'Server non raggiungibile. Avvia AgroPlan e premi Riprova.';
+          serverReady = false;
+          error = e is ServerConnectionException ? e.message : 'Collegamento non riuscito. Verifica la rete e premi Riprova. Render Free può richiedere oltre un minuto per riattivarsi.';
         });
       }
     }
@@ -219,7 +230,43 @@ class _LoginPageState extends State<LoginPage> {
         ),
       );
     }
-    if (pairingAvailable) {
+    if (!serverReady) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('AgroPlan')),
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: SizedBox(
+              width: 400,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Icon(Icons.cloud_off_outlined, size: 48),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Collegamento al server',
+                    style: TextStyle(fontSize: 24),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(error ?? 'Verifica il collegamento prima di accedere.'),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: checkServer,
+                    child: const Text('Riprova collegamento'),
+                  ),
+                  if (!kIsWeb)
+                    TextButton(
+                      onPressed: () => setState(() => configuringServer = true),
+                      child: const Text('Configura server'),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    if ((pairingAvailable || !kIsWeb) && !creating && !accountLoginRequested) {
       return Scaffold(
         appBar: AppBar(title: const Text('AgroPlan')),
         body: Center(
@@ -277,7 +324,7 @@ class _LoginPageState extends State<LoginPage> {
                   TextButton(
                     onPressed: busy
                         ? null
-                        : () => setState(() => pairingAvailable = false),
+                        : () => setState(() => accountLoginRequested = true),
                     child: const Text('Accesso con account'),
                   ),
                   if (!kIsWeb)

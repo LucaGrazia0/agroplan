@@ -49,3 +49,35 @@ def test_real_postgres_persistence_ids_conflicts_and_analysis(pg_client,parcel):
     assert client.get('/agronomy/overview',headers=auth).json()['parcels'][0]['review']['coverage']['soil'] is True
     assert client.post('/auth/logout',headers=auth).status_code==204
     assert client.get('/parcels',headers=auth).status_code==401
+
+
+def test_verified_local_migration_and_passwordless_pairing(pg_client,parcel,tmp_path,monkeypatch):
+    import json
+    from transfer import migrate,issue_pairing,export_backup
+    client,_=pg_client
+    with storage.connect() as db:
+        db.execute('DELETE FROM auth_sessions')
+        db.execute('DELETE FROM auth_users')
+    source=tmp_path/'source.sqlite'
+    with monkeypatch.context() as local:
+        local.delenv('DATABASE_URL')
+        local.setattr(storage,'DB',source)
+        storage.initialize()
+        with storage.connect() as db:
+            db.execute('INSERT INTO agr_parcels(id,farm_id,payload,revision) VALUES(?,?,?,?)',('field-1','local',json.dumps(parcel),1))
+            db.execute("INSERT INTO agr_crop_cycles(id,parcel_id,season,crop) VALUES(10,'field-1','2026','orzo')")
+            db.execute("INSERT INTO agr_bbch_observations(cycle_id,observed_at,bbch) VALUES(10,'2026-11-01',25)")
+    backup=tmp_path/'before.sqlite'
+    counts=migrate(source,'farm-owner','owner',backup)
+    assert backup.is_file() and counts['agr_crop_cycles']==1
+    pairing=tmp_path/'pair.txt'
+    issue_pairing('owner',pairing)
+    response=client.post('/auth/pair',json={'code':pairing.read_text().strip()})
+    assert response.status_code==200
+    auth={'Authorization':'Bearer '+response.json()['access_token']}
+    assert client.get('/agronomy/overview',headers=auth).json()['parcels'][0]['crop_context']['latest_bbch']['bbch']==25
+    next_cycle=client.post('/crop/cycles',json={'parcel_id':'field-1','season':'2027','crop':'orzo'},headers=auth).json()
+    assert next_cycle['id']>10
+    exported=tmp_path/'cloud.json'
+    export_backup(exported)
+    assert len(json.loads(exported.read_text())['tables']['agr_crop_cycles'])==2

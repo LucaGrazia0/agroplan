@@ -59,7 +59,8 @@ void main() {
     await tester.tap(find.text('Collega server'));
     await tester.pumpAndSettle();
     expect(requests.single, Uri.parse('https://api.example/auth/status'));
-    expect(find.text('Accedi alla tua azienda'), findsOneWidget);
+    expect(find.text('Abbina questo dispositivo'), findsOneWidget);
+    expect(find.text('Password'), findsNothing);
     await tester.tap(find.text('Configura server'));
     await tester.pumpAndSettle();
     expect(find.text('Collega il tuo server'), findsOneWidget);

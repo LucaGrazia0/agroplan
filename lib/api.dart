@@ -173,8 +173,22 @@ class ApiSession extends ChangeNotifier {
     final response = await _client
         .get(Uri.parse('$apiBaseUrl/auth/status'))
         .timeout(const Duration(seconds: 75));
-    if (response.statusCode != 200) throw Exception('Server non raggiungibile');
+    if (response.statusCode == 404 || response.statusCode == 405) {
+      throw const ServerConnectionException(
+        'Il server online usa una versione precedente e deve essere aggiornato. Nome utente e password non risolvono questo problema.',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw const ServerConnectionException(
+        'Il server AgroPlan non è disponibile. Il piano gratuito può impiegare oltre un minuto per riattivarsi: premi Riprova.',
+      );
+    }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (data['setup_required'] is! bool) {
+      throw const ServerConnectionException(
+        'Questo indirizzo non restituisce un server AgroPlan compatibile. Verifica l’indirizzo del server.',
+      );
+    }
     if (data['local_mode'] == true) {
       localAccess = true;
       _token = null;
@@ -246,6 +260,13 @@ class ApiSession extends ChangeNotifier {
     farmId = null;
     notifyListeners();
   }
+}
+
+class ServerConnectionException implements Exception {
+  const ServerConnectionException(this.message);
+  final String message;
+  @override
+  String toString() => message;
 }
 
 Map<String, String> _headers(Map<String, String>? headers) => {
