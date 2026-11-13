@@ -32,10 +32,7 @@ class _SoilPanelState extends State<SoilPanel> {
   Map<String, dynamic>? automatic;
   String? automaticError;
 
-  static const baseUrl = String.fromEnvironment(
-    'AGROPLAN_API_URL',
-    defaultValue: 'http://127.0.0.1:8000',
-  );
+  static String get baseUrl => http.apiBaseUrl;
 
   @override
   void initState() {
@@ -258,7 +255,20 @@ class _SoilPanelState extends State<SoilPanel> {
             builder: (context) {
               final result = entry.value.value;
               final raw = _responseText(result['response']);
-              final descriptions = _descriptions(raw);
+              final units = (result['soil_units'] as List? ?? [])
+                  .whereType<Map>()
+                  .toList();
+              final descriptions = units.isEmpty
+                  ? _descriptions(raw)
+                  : <String>{
+                      for (final unit in units)
+                        for (final text
+                            in (unit['descriptions'] as List? ?? []))
+                          text.toString(),
+                    }.toList();
+              final title = units.isEmpty
+                  ? 'Risultato cartografico ${entry.key + 1}'
+                  : units.map((u) => '${u['code']} · ${u['name']}').join(' / ');
               return Container(
                 width: double.infinity,
                 margin: const EdgeInsets.only(bottom: 10),
@@ -275,7 +285,7 @@ class _SoilPanelState extends State<SoilPanel> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Risultato cartografico ${entry.key + 1}',
+                      title,
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 5),

@@ -4,7 +4,8 @@ part of 'main.dart';
 // overwrites across devices; deletions are queued separately from updates.
 abstract class _ParcelSyncState extends State<AgroPlanHome> {
   final parcels = <FarmParcel>[];
-  final String cacheKey = 'agroplan_parcels_v2_${ApiSession.instance.farmId}';
+  final String cacheKey =
+      'agroplan_parcels_v3_${Uri.encodeComponent(apiBaseUrl)}_${ApiSession.instance.farmId}';
   final pendingDeletes = <String, int>{};
   final pendingSoil = <Map<String, dynamic>>[];
   int soilRevision = 0;
@@ -348,7 +349,9 @@ mixin _ParcelSync on _ParcelSyncState {
   Future<void> importLegacyParcels() async {
     if (syncing) return;
     final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('agroplan_parcels');
+    final saved =
+        prefs.getString('agroplan_parcels_v2_${ApiSession.instance.farmId}') ??
+        prefs.getString('agroplan_parcels');
     if (!mounted) return;
     if (saved == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -381,7 +384,11 @@ mixin _ParcelSync on _ParcelSyncState {
     );
     if (!mounted || confirmed != true) return;
     try {
-      final imported = (jsonDecode(saved) as List)
+      final decoded = jsonDecode(saved);
+      final rows = decoded is Map
+          ? decoded['parcels'] as List
+          : decoded as List;
+      final imported = rows
           .map((p) => FarmParcel.fromJson(Map<String, dynamic>.from(p as Map)))
           .toList();
       setState(() {

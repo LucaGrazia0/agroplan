@@ -1,8 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:agroplan/main.dart';
+import 'package:agroplan/api.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 void main() {
+  setUp(
+    () => useHttpClientForTesting(
+      MockClient(
+        (_) async => http.Response(
+          '{"setup_required":false,"setup_enabled":false}',
+          200,
+        ),
+      ),
+    ),
+  );
+  tearDown(() => useHttpClientForTesting(http.Client()));
   testWidgets('La schermata iniziale richiede l’accesso all’azienda', (
     tester,
   ) async {

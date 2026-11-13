@@ -107,3 +107,43 @@ def logout(request: Request, user: CurrentUser):
     token = request.headers['authorization'].split(' ', 1)[1]
     with connect() as db:
         db.execute('DELETE FROM auth_sessions WHERE token_hash=?', (digest(token),))
+
+
+class SetupAccount(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=12, max_length=1024)
+    farm_id: str = Field(min_length=1, max_length=100, pattern=r'^[a-zA-Z0-9][a-zA-Z0-9_-]*$')
+    setup_token: str = Field(min_length=32, max_length=200)
+    claim_legacy: bool = False
+
+
+@router.get('/status')
+def account_status():
+    import os
+    with connect() as db:
+        empty = db.execute('SELECT 1 FROM auth_users LIMIT 1').fetchone() is None
+        legacy = db.execute("SELECT 1 FROM agr_parcels WHERE farm_id='__legacy__' LIMIT 1").fetchone() is not None
+    return {'setup_required': empty, 'setup_enabled': empty and len(os.getenv('AGROPLAN_SETUP_TOKEN', '')) >= 32,
+            'legacy_available': empty and legacy}
+
+
+@router.post('/setup', status_code=201)
+def setup_account(item: SetupAccount):
+    import os
+    import re
+    username = item.username.strip().lower()
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_.@+-]{0,99}', username):
+        raise HTTPException(422, 'Nome utente non valido.')
+    expected = os.getenv('AGROPLAN_SETUP_TOKEN', '')
+    if len(expected) < 32 or not secrets.compare_digest(item.setup_token.encode(), expected.encode()):
+        raise HTTPException(403, 'Codice di attivazione non valido. Usa il collegamento generato all’avvio.')
+    hashed = password_hash.hash(item.password)
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        if db.execute('SELECT 1 FROM auth_users LIMIT 1').fetchone():
+            raise HTTPException(409, 'Il primo account è già stato creato. Accedi con le tue credenziali.')
+        db.execute('INSERT INTO auth_users(username,password_hash,farm_id) VALUES(?,?,?)',
+                   (username, hashed, item.farm_id))
+        if item.claim_legacy:
+            db.execute("UPDATE agr_parcels SET farm_id=?,revision=0 WHERE farm_id='__legacy__'", (item.farm_id,))
+    return {'username': username, 'farm_id': item.farm_id}

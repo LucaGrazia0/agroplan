@@ -1,87 +1,115 @@
 # AgroPlan
 
-App Flutter per particelle agricole, monitoraggio Sentinel-2, meteo, analisi del suolo, cicli colturali e osservazioni BBCH. Backend FastAPI con account per azienda, sessioni revocabili e SQLite persistente. Le versioni runtime verificate sono fissate in `backend/requirements-lock.txt`; `requirements.txt` descrive gli intervalli per gli aggiornamenti futuri. Stato: alpha, con test automatici; i suggerimenti agronomici sono esplorativi e non modelli diagnostici validati.
+App per particelle agricole, Sentinel-2, meteo, suolo, cicli colturali e BBCH. Interfaccia Flutter e API FastAPI vengono servite **dallo stesso indirizzo**: non occorre collegare manualmente due server. Gli account e i dati sono separati per azienda. Stato: alpha con test automatici e verifiche reali delle integrazioni; le segnalazioni agronomiche restano esplorative.
 
-## Avvio locale
+## Avvio completo sul Mac
 
-Requisiti: Python 3.12 e Flutter 3.47.6 / Dart 3.13.5 (versioni usate dalla CI).
+Aprire **Avvia AgroPlan.command** con un doppio clic, oppure dal terminale nella cartella del progetto:
+
+```sh
+bash 'Avvia AgroPlan.command'
+```
+
+L’avvio prepara un ambiente Python isolato in `.local/runtime`, installa le versioni verificate e compila l’interfaccia solo se necessario. Quando la build è già aggiornata, non serve avviare Flutter. Alla prima compilazione occorrono Python 3.12 e Flutter 3.47.6 / Dart 3.13.5; `FLUTTER_BIN` permette di scegliere un’installazione Flutter specifica.
+
+L’app si apre su **http://localhost:8091**. Al primo avvio scegli nome utente, password e identificativo azienda. La password richiede almeno 12 caratteri e non va inviata in chat. Il collegamento aperto dal launcher contiene un codice monouso: il server non permette registrazioni libere. In modalità `--no-browser` il collegamento riservato si trova in `.local/setup-link.txt`, leggibile solo dal proprietario. Riaprire il launcher apre lo stesso servizio già attivo; non avvia un secondo server e non termina altri processi.
+
+Se il vecchio database contiene dati, viene creato un backup verificato **prima** della migrazione in `backend/backups/`. Nel primo accesso si può scegliere esplicitamente di associare i dati precedenti alla propria azienda. I confini delle particelle, che prima erano conservati solo nel browser, si importano con **Importa particelle precedenti**, usando lo stesso browser e l’origine del vecchio avvio. Le copie precedenti vengono conservate.
+
+Il precedente `backend/start_mac.sh` ora avvia lo stesso percorso completo. Per cambiare porta:
+
+```sh
+bash 'Avvia AgroPlan.command' --port 8092
+```
+
+## Credenziali e collegamenti
+
+Le credenziali Copernicus vanno solo in `backend/.env`, copiando `backend/.env.example` se il file non esiste. Non copiarle nel frontend. Le altre fonti configurate non richiedono chiavi nel client.
+
+Il pulsante **Verifica collegamenti** nella barra dell’app prova realmente:
+
+- autenticazione Copernicus;
+- storico Open-Meteo con ET0 e storico di riserva NASA POWER;
+- previsioni MET Norway;
+- cartografia del suolo Emilia-Romagna;
+- mappe OpenStreetMap e immagini Esri.
+
+Gli esiti vengono aggiornati al massimo una volta al minuto per la stessa zona. Fuori dalla copertura cartografica configurata, il suolo viene indicato come non coperto; le analisi manuali rimangono disponibili.
+
+La diagnostica da terminale usa le credenziali del backend senza scriverle nei risultati:
+
+```sh
+.local/runtime/bin/python scripts/check_integrations.py --full --output .local/integrations.json
+.local/runtime/bin/python scripts/smoke_live.py --output .local/live-smoke.json
+```
+
+Il secondo comando usa un database temporaneo e servizi esterni reali: verifica primo account, accesso, particelle, colture, BBCH, meteo, suolo, NDVI, DVI, immagini, statistiche, cancellazione e revoca della sessione. Non modifica i dati aziendali. Richiede rete e una piccola quantità della quota Copernicus dell’account configurato.
+
+## Salvataggi e account
+
+Le particelle sono conservate sul server e in una cache locale separata per **server e azienda**. Le modifiche offline vengono ritentate con **Sincronizza**. Le revisioni impediscono sovrascritture silenziose tra dispositivi: l’app chiede quale versione conservare. Le cancellazioni lasciano una tombstone; le analisi offline hanno identificativi che impediscono duplicati se una risposta va persa.
+
+Le sessioni durano 8 ore; il token rimane solo in memoria. Al riavvio si accede nuovamente. Uscire revoca la sessione quando il server è raggiungibile. Le copie locali rimangono sul dispositivo per il recupero offline: usare un profilo dispositivo riservato alle persone autorizzate.
+
+Gli altri account sono creati dal responsabile. Usare lo stesso identificativo azienda solo quando si vuole condividere intenzionalmente l’accesso ai dati:
+
+```sh
+.local/runtime/bin/python backend/manage.py create-user collega --farm azienda-locale
+.local/runtime/bin/python backend/manage.py set-password collega
+.local/runtime/bin/python backend/manage.py disable-user collega
+.local/runtime/bin/python backend/manage.py claim-legacy --farm azienda-locale
+```
+
+L’ultimo comando assegna i record precedenti ancora privi di proprietario: usarlo solo per l’azienda a cui appartengono. Le operazioni sulle password avvengono in modo interattivo. La registrazione iniziale dal browser è disabilitata dopo la creazione del primo account e richiede un codice casuale generato dal launcher.
+
+## Pubblicazione online
+
+`render.yaml` ora compila **anche il frontend** tramite `scripts/render_build.sh`, avvia le API dalla radice del repository e serve l’app allo stesso URL. Le risorse grafiche Flutter vengono incluse nel bundle. La build web non contiene indirizzi localhost o URL segnaposto: usa l’origine da cui è stata aperta.
+
+La configurazione propone un servizio **Starter con disco persistente da 1 GB**, montato in `/var/data`, e `AGROPLAN_DB_PATH=/var/data/agroplan.db`. **Richiede un piano a pagamento**: verificarne i costi prima di applicarla. Non viene attivato alcun piano dal codice. [Persistenza Render](https://render.com/docs/disks), [directory del servizio Render](https://render.com/docs/monorepo-support).
+
+Per un servizio esistente: trasferire il vecchio database sul disco prima di cambiare percorso, impostare le due credenziali Copernicus nel dashboard e creare gli account dalla shell del servizio con `python backend/manage.py`. I dati precedenti restano riservati fino all’assegnazione esplicita. Il codice di primo avvio locale non viene trasferito alla produzione. Un eventuale primo avvio remoto richiede un `AGROPLAN_SETUP_TOKEN` casuale di almeno 32 caratteri, configurato esplicitamente dall’operatore e poi rimosso dopo l’attivazione.
+
+Il frontend servito dalle API non richiede CORS aggiuntivo. Per un client web su un’origine diversa impostare `CORS_ORIGINS`; per client nativi compilare con l’URL HTTPS reale del backend tramite `--dart-define=AGROPLAN_API_URL=...`.
+
+## Backup e ripristino
+
+`AGROPLAN_DB_PATH` sceglie il database; in locale il valore predefinito è `backend/agroplan.db`. SQLite usa WAL e le connessioni vengono chiuse dopo ogni operazione. Per un backup coerente anche a server attivo:
+
+```sh
+.local/runtime/bin/python backend/manage.py backup /percorso-riservato/agroplan-2026-11-12.sqlite
+```
+
+La destinazione deve essere nuova; il comando verifica l’integrità e imposta permessi al solo proprietario. Conservare copie anche fuori dal volume del servizio. Per ripristinare: fermare il backend, conservare database e relativi WAL/SHM correnti, verificare il backup con `PRAGMA integrity_check`, sostituire il database con il backup verificato e riavviare. Prima di riaprire il servizio revocare le sessioni presenti nel backup ripristinato.
+
+## Sviluppo e test
+
+Le versioni runtime verificate sono in `backend/requirements-lock.txt`; `requirements.txt` descrive gli intervalli per gli aggiornamenti futuri.
 
 ```sh
 python3.12 -m venv backend/.venv
 backend/.venv/bin/python -m pip install -r backend/requirements-dev.txt
-cp backend/.env.example backend/.env
-```
-
-Inserire le credenziali Copernicus in `backend/.env` per le funzioni satellitari. Meteo, particelle, colture e analisi manuali non richiedono credenziali Copernicus.
-
-Creare un account: la password viene richiesta in modo interattivo, non va inserita negli argomenti del comando. Ogni azienda ha un identificativo; account con lo stesso `--farm` condividono intenzionalmente le particelle.
-
-```sh
-backend/.venv/bin/python backend/manage.py create-user luca --farm azienda-luca
-backend/.venv/bin/python -m uvicorn main:app --app-dir backend --host 127.0.0.1 --port 8000
-```
-
-In un secondo terminale:
-
-```sh
+backend/.venv/bin/python -m pytest -q
 flutter pub get
+flutter analyze
+flutter test
+python3.12 scripts/build_web.py
+```
+
+Per lavorare con hot reload e API separate:
+
+```sh
+backend/.venv/bin/python -m uvicorn main:app --app-dir backend --port 8000
 flutter run -d chrome --web-port 8091 --dart-define=AGROPLAN_API_URL=http://127.0.0.1:8000
 ```
 
-Aprire l’app, accedere, disegnare una particella e attendere il salvataggio sul server. Registrare il ciclo colturale e una osservazione BBCH. Il pannello agronomico si aggiorna dopo ogni salvataggio. Per Android emulator usare `http://10.0.2.2:8000`; per dispositivi fisici impostare un backend raggiungibile. Su internet usare HTTPS e configurare `CORS_ORIGINS` con le origini esatte dell’app.
-
-## Dati precedenti e sincronizzazione
-
-La migrazione aggiunge le tabelle di accesso e proprietà senza eliminare i record esistenti. I dati agronomici precedenti sono riservati fino all’assegnazione esplicita da parte dell’amministratore:
-
-```sh
-backend/.venv/bin/python backend/manage.py claim-legacy --farm azienda-luca
-```
-
-Eseguire questa operazione solo per l’azienda proprietaria dei dati del vecchio database. Nell’app usare **Importa particelle precedenti** per copiare i confini dalle preferenze locali nell’azienda selezionata. La vecchia copia rimane intatta; l’importazione non sovrascrive particelle già presenti. La cache nuova è separata per azienda.
-
-Il server conserva le particelle, le analisi e i cicli. Le modifiche alle particelle vengono salvate anche sul dispositivo e ritentate premendo **Sincronizza**. Le revisioni impediscono di sovrascrivere silenziosamente modifiche fatte su un altro dispositivo: in caso di conflitto l’app chiede quale versione conservare. Le cancellazioni hanno una tombstone per impedire che un dispositivo offline ricrei un campo eliminato. Le analisi di laboratorio salvate durante un’interruzione di rete restano in una coda locale e vengono inviate alla sincronizzazione successiva; un identificativo impedisce duplicati se una risposta va persa.
-
-Le sessioni durano 8 ore e il token rimane solo in memoria; al riavvio si accede nuovamente. Uscire revoca la sessione sul server quando è raggiungibile. I dati locali rimangono sul dispositivo per il recupero offline: usare un profilo dispositivo riservato alle persone autorizzate all’azienda.
-
-```sh
-backend/.venv/bin/python backend/manage.py set-password luca
-backend/.venv/bin/python backend/manage.py disable-user luca
-```
-
-Entrambi revocano le sessioni dell’account. La registrazione pubblica non è prevista: gli account vengono creati dal responsabile tramite CLI.
-
-## Persistenza e backup
-
-`AGROPLAN_DB_PATH` sceglie il database; in assenza di configurazione si usa `backend/agroplan.db`. Le connessioni vengono chiuse dopo ogni operazione. SQLite usa WAL e le query di modifica delle particelle verificano atomicamente proprietà e revisione.
-
-`render.yaml` prepara un servizio **Starter con disco persistente da 1 GB**, montato in `/var/data`, e imposta `AGROPLAN_DB_PATH=/var/data/agroplan.db`. **Richiede un piano a pagamento**: verificare i costi prima di applicarlo. Non è stato attivato alcun servizio. Impostare le credenziali Copernicus e `CORS_ORIGINS` nel dashboard; creare poi gli utenti dalla shell del servizio. Se si migra un servizio esistente, esportare e trasferire il vecchio database prima di cambiare percorso. Il filesystem del piano gratuito Render non conserva le modifiche tra riavvii/deploy; non usarlo per dati reali. [Documentazione Render sui dischi](https://render.com/docs/disks).
-
-Creare backup SQLite coerenti anche mentre il servizio è attivo (usa `sqlite3.backup`, non una copia del solo file `.db`):
-
-```sh
-backend/.venv/bin/python backend/manage.py backup /percorso-riservato/agroplan-2026-11-12.sqlite
-```
-
-La destinazione deve essere nuova; il comando verifica l’integrità e imposta permessi di lettura/scrittura al solo proprietario. Conservare copie anche fuori dal volume del servizio. Per ripristinare: fermare il backend, conservare database e relativi file WAL/SHM correnti, verificare il backup con `PRAGMA integrity_check`, sostituire il database sul volume con il backup verificato e riavviare. Il ripristino torna allo stato del backup, incluse le sessioni allora esistenti: revocarle prima di riaprire il servizio.
+La CI esegue test backend offline, analisi e test Flutter, e build web. Non usa credenziali esterne. Le verifiche live sono separate per non consumare quote durante ogni commit.
 
 ## Fonti e limiti
 
-- Sentinel-2 L2A tramite Copernicus: NDVI/DVI, maschera SCL, statistiche sul poligono e acquisizioni temporali. Nessun dato satellitare simulato quando il fornitore fallisce.
-- Open-Meteo è la prima fonte per lo storico completo, inclusa ET0. La mancata disponibilità delle previsioni non scarta uno storico valido. NASA POWER è il fallback: non fornisce ET0 nell’integrazione attuale; in questo caso il bilancio P − ET0 resta esplicitamente assente. MET Norway integra le previsioni quando disponibile.
-- Le finestre agronomiche richiedono giorni distinti e consecutivi fino alla data dichiarata dello storico; duplicati e lacune non diventano uno storico completo.
-- La ricerca automatica del suolo interroga la cartografia dell’Emilia-Romagna su punti rappresentativi. Non sostituisce analisi di laboratorio né calcola una media pesata sull’intero appezzamento.
-- Gli avvisi non diagnosticano malattie, infestanti o carenze e non prescrivono irrigazioni, trattamenti o concimazioni.
+- Sentinel-2 L2A tramite Copernicus: NDVI/DVI, maschera SCL, immagini ritagliate sul poligono e serie temporali. I giorni del selettore sono unici e ordinati. La prima visualizzazione cerca un’acquisizione disponibile e carica anche le statistiche; i giorni mancanti non vengono simulati.
+- Open-Meteo è la prima fonte per lo storico con ET0; l’assenza delle previsioni non scarta uno storico valido. NASA POWER è il fallback, senza ET0 nell’integrazione attuale. MET Norway integra le previsioni. Finestre con date duplicate o mancanti non risultano complete.
+- La cartografia Emilia-Romagna è interrogata su punti rappresentativi. Codici e nomi delle unità vengono mostrati senza trasformarli in analisi di laboratorio; non viene calcolata una media pesata sull’intera superficie.
+- Gli avvisi non diagnosticano malattie o carenze e non prescrivono irrigazioni, trattamenti o concimazioni.
 
-## Verifiche
-
-```sh
-backend/.venv/bin/python -m pytest -q
-flutter analyze
-flutter test
-flutter build web --release --dart-define=AGROPLAN_API_URL=https://backend.example.com
-```
-
-La CI esegue test backend offline (accessi, isolamento aziende, revisioni, cancellazioni, percorso particella → ciclo → BBCH → analisi → indicatori, fallback meteo e serie storiche), analisi Flutter, widget test e compilazione web. Non usa credenziali Copernicus e non dimostra la disponibilità corrente dei servizi esterni.
-
-La sorgente attiva è in `lib/`; `flutter/` e `backup_*` sono copie storiche locali escluse dal repository, insieme ad ambienti virtuali, database, credenziali e file generati.
+La sorgente attiva è in `lib/`. Copie storiche, ambienti, build, database, collegamenti di attivazione e credenziali sono esclusi dal repository.

@@ -10,7 +10,7 @@ import 'package:agroplan/api.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 class SentinelApi {
-  SentinelApi({this.baseUrl = 'http://127.0.0.1:8000'});
+  SentinelApi({String? baseUrl}) : baseUrl = baseUrl ?? http.apiBaseUrl;
   final String baseUrl;
 
   Map<String, dynamic> polygonGeometry(List<LatLng> vertices) {

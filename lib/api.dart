@@ -4,9 +4,20 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as transport;
 export 'package:http/http.dart' show Response, ClientException;
 
-const apiBaseUrl = String.fromEnvironment(
-  'AGROPLAN_API_URL',
-  defaultValue: 'http://127.0.0.1:8000',
+String resolveApiBaseUrl(String configured, Uri page, {required bool isWeb}) {
+  if (configured.trim().isNotEmpty) {
+    return configured.trim().replaceFirst(RegExp(r'/+$'), '');
+  }
+  if (isWeb && (page.scheme == 'https' || page.scheme == 'http')) {
+    return page.origin;
+  }
+  return 'http://127.0.0.1:8091';
+}
+
+final apiBaseUrl = resolveApiBaseUrl(
+  const String.fromEnvironment('AGROPLAN_API_URL'),
+  Uri.base,
+  isWeb: kIsWeb,
 );
 
 transport.Client _client = transport.Client();
@@ -46,6 +57,46 @@ class ApiSession extends ChangeNotifier {
     this.username = data['user']['username'] as String;
     farmId = data['user']['farm_id'] as String;
     notifyListeners();
+  }
+
+  Future<Map<String, dynamic>> accountStatus() async {
+    final response = await _client
+        .get(Uri.parse('$apiBaseUrl/auth/status'))
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) throw Exception('Server non raggiungibile');
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<void> setup({
+    required String username,
+    required String password,
+    required String farmId,
+    required String token,
+    required bool claimLegacy,
+  }) async {
+    final response = await _client
+        .post(
+          Uri.parse('$apiBaseUrl/auth/setup'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'username': username,
+            'password': password,
+            'farm_id': farmId,
+            'setup_token': token,
+            'claim_legacy': claimLegacy,
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
+    if (response.statusCode != 201) {
+      final data = jsonDecode(response.body);
+      final detail = data is Map ? data['detail'] : null;
+      throw Exception(
+        detail is String
+            ? detail
+            : 'Controlla nome utente, azienda e password.',
+      );
+    }
+    await login(username, password);
   }
 
   Future<void> logout() async {

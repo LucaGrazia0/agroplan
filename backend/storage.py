@@ -23,7 +23,30 @@ def connect():
         conn.close()
 
 
+def backup_before_first_migration():
+    if not DB.is_file():
+        return
+    from contextlib import closing
+    from datetime import datetime, timezone
+    with closing(sqlite3.connect(DB)) as source:
+        if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='auth_users'").fetchone():
+            return
+        directory = DB.parent / 'backups'
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        directory.chmod(0o700)
+        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+        destination = directory / f'pre-accessi-{stamp}.sqlite'
+        with destination.open('xb'):
+            pass
+        destination.chmod(0o600)
+        with closing(sqlite3.connect(destination)) as target:
+            source.backup(target)
+            if target.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                raise RuntimeError('Backup precedente alla migrazione non valido.')
+
+
 def initialize():
+    backup_before_first_migration()
     with connect() as db:
         db.execute('PRAGMA journal_mode=WAL')
         db.executescript('''

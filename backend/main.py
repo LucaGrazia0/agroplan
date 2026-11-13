@@ -18,7 +18,9 @@ from storage import initialize
 from auth import require_user, router as auth_router
 from parcel_api import router as parcel_router
 from weather_history import daily_window
+from web_app import mount_web_app, web_directory
 import math
+import sys
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -33,7 +35,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="AgroPlan API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="AgroPlan API", version="0.3.0", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(parcel_router)
 origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8080,http://localhost:8090,http://127.0.0.1:8090,http://localhost:8091,http://127.0.0.1:8091,http://localhost:5173").split(",") if x.strip()]
@@ -183,7 +185,7 @@ def data_filter(day: DateType, max_cloud: float) -> dict:
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "credentials_configured": bool(os.getenv("COPERNICUS_CLIENT_ID") and os.getenv("COPERNICUS_CLIENT_SECRET"))}
+    return {"status": "ok", "service": "agroplan", "version": app.version, "web_available": (web_directory() / "index.html").is_file(), "credentials_configured": bool(os.getenv("COPERNICUS_CLIENT_ID") and os.getenv("COPERNICUS_CLIENT_SECRET"))}
 
 
 @app.get("/auth/check", dependencies=[Depends(require_user)])
@@ -247,19 +249,20 @@ async def overlay(req: OverlayRequest):
 @app.post("/statistics", dependencies=[Depends(require_user)])
 async def statistics(req: GeometryRequest):
     day = req.date or DateType.today() - timedelta(days=7)
-    bbox = bbox_from_geometry(req.geometry)
     results = {}
     for index in ("ndvi", "dvi"):
-        # A numeric output band and a separate validity mask are provided by evalscript.
-        # The statistical API uses output.dataMask to exclude invalid pixels.
-        script = evalscript(index, stats=True).replace('output: { bands: 2, sampleType: "FLOAT32" }', 'output: [{ id: "index", bands: 1, sampleType: "FLOAT32" }, { id: "dataMask", bands: 1 }]')
-        script = script.replace('return [value, valid ? 1 : 0];', 'return { index: [value], dataMask: [valid ? 1 : 0] };')
-        body = {"input": {"bounds": {"geometry": req.geometry, "properties": {"crs": "http://www.opengis.net/def/crs/OGC/1.3/CRS84"}}, "data": [{"type": "sentinel-2-l2a", "dataFilter": data_filter(day, req.max_cloud_coverage)}]}, "aggregation": {"timeRange": data_filter(day, req.max_cloud_coverage)["timeRange"], "aggregationInterval": {"of": "P1D"}, "evalscript": script, "resx": 0.00013, "resy": 0.00009}, "calculations": {"index": {"statistics": {"default": {"percentiles": {"k": [25, 50, 75]}}}}}}
-        r = await sentinel_post("/statistics", body)
-        data = r.json().get("data", [])
-        outputs = [x.get("outputs", {}).get("index", {}).get("bands", {}).get("B0", {}).get("stats", {}) for x in data]
-        results[index] = {"mean": outputs[0].get("mean") if outputs else None, "stDev": outputs[0].get("stDev") if outputs else None, "sampleCount": outputs[0].get("sampleCount") if outputs else None}
-    return {"date": day.isoformat(), "bbox": bbox, "indices": results, "note": "Null values mean no valid observations. Statistics use 10 m pixels and exclude cloudy/shadow/snow pixels."}
+        # Use the same full-day interval and parser as the time-series endpoint.
+        # Ending at 23:59:59 makes a P1D interval incomplete and can return no data.
+        observation = await parcel_stats_for_date(ParcelTimeSeriesRequest(
+            geometry=req.geometry, dates=[day], index=index,
+            max_cloud_coverage=req.max_cloud_coverage,
+        ), day)
+        results[index] = {
+            "mean": observation["mean"], "stDev": observation.get("stDev"),
+            "sampleCount": observation.get("sample_count"), "status": observation["status"],
+        }
+    return {"date": day.isoformat(), "bbox": bbox_from_geometry(req.geometry), "indices": results,
+            "note": "Statistiche sul poligono con maschera nuvole e campionamento di circa 10 m. Valori nulli indicano assenza di osservazioni valide."}
 
 
 
@@ -315,7 +318,7 @@ def parse_statistical_response(payload: dict, day: DateType) -> dict:
     if not isinstance(entries, list):
         raise HTTPException(502, "Risposta statistica Sentinel priva del campo data")
     empty = {"date": day.isoformat(), "mean": None, "min": None, "max": None,
-             "valid_percent": None, "sample_count": None, "valid_count": None}
+             "valid_percent": None, "sample_count": None, "valid_count": None, "stDev": None}
     if not entries:
         return {**empty, "status": "no_acquisition"}
 
@@ -330,10 +333,10 @@ def parse_statistical_response(payload: dict, day: DateType) -> dict:
             valid_count = max(0, valid_count)
         valid_percent = (100 * valid_count / count if valid_count is not None and count else None)
         mean = stats.get("mean")
-        if isinstance(mean, (int, float)) and (valid_count is None or valid_count > 0):
+        if isinstance(mean, (int, float)) and not isinstance(mean, bool) and math.isfinite(mean) and (valid_count is None or valid_count > 0):
             return {"date": day.isoformat(), "mean": mean, "min": stats.get("min"),
                     "max": stats.get("max"), "valid_percent": valid_percent,
-                    "sample_count": count, "valid_count": valid_count, "status": "ok"}
+                    "sample_count": count, "valid_count": valid_count, "stDev": stats.get("stDev"), "status": "ok"}
         if isinstance(count, (int, float)) and valid_count == 0:
             return {**empty, "sample_count": count, "valid_count": 0,
                     "valid_percent": 0.0 if count else None, "status": "no_valid_pixels"}
@@ -526,7 +529,7 @@ async def _met_norway_weather(req):
     from zoneinfo import ZoneInfo
 
     headers = {
-        "User-Agent": "AgroPlan/0.1 (agricultural weather application)"
+        "User-Agent": "AgroPlan/0.3 (+https://github.com/LucaGrazia0)"
     }
     params = {
         "lat": round(req.latitude, 5),
@@ -770,3 +773,10 @@ app.include_router(soil_router)
 
 from agronomy_engine import register_agronomy_routes
 register_agronomy_routes(app, parcel_weather, WeatherRequest)
+
+
+from integrations import register_integration_routes
+from integration_checks import provider_checks
+register_integration_routes(app, provider_checks(sys.modules[__name__]))
+
+mount_web_app(app)

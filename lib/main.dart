@@ -16,6 +16,8 @@ import 'crop_panel.dart';
 import 'agronomy_panel.dart';
 import 'api.dart';
 import 'login_page.dart';
+import 'integrations_dialog.dart';
+import 'satellite_scenes.dart';
 
 part 'parcel_sync.dart';
 
@@ -152,11 +154,11 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
   String indexLayer = "Nessuno";
   // Copernicus backend locale. Su Android emulator usare 10.0.2.2;
   // su dispositivi fisici usare l'IP LAN del Mac e un server accessibile in rete.
-  static const String copernicusBaseUrl = String.fromEnvironment(
-    'AGROPLAN_API_URL',
-    defaultValue: 'http://127.0.0.1:8000',
+  static String get copernicusBaseUrl => apiBaseUrl;
+  DateTime satelliteDate = DateTime.now().toUtc().subtract(
+    const Duration(days: 7),
   );
-  DateTime satelliteDate = DateTime(2026, 10, 4);
+  bool satelliteDateChosen = false;
   bool satelliteBusy = false;
   String? satelliteError;
   String? overlayParcelId;
@@ -488,6 +490,7 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
         clearSatelliteOverlay();
         clearWeather();
         availableScenes = [];
+        satelliteDateChosen = false;
       }
       selectedId = found?.id;
     });
@@ -499,6 +502,10 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
     drawing = true;
     selectedId = null;
     drawingPoints.clear();
+    availableScenes = [];
+    satelliteDateChosen = false;
+    clearSatelliteOverlay();
+    clearWeather();
   });
 
   void cancelDrawing() => setState(() {
@@ -587,6 +594,23 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
       temporalStats = [];
     });
     try {
+      if (!satelliteDateChosen) {
+        if (availableScenes.isEmpty) await searchSatelliteScenes();
+        if (!mounted || id != statsRequestId || selectedId != parcel.id) return;
+        if (availableScenes.isEmpty) {
+          setState(() {
+            statsBusy = false;
+            statsError = 'Nessuna acquisizione utilizzabile disponibile.';
+          });
+          return;
+        }
+        setState(() {
+          satelliteDate = DateTime.parse(
+            availableScenes.first['datetime'].toString(),
+          );
+          satelliteDateChosen = true;
+        });
+      }
       final selectedDay = formatSatelliteDate(satelliteDate);
       final dates = <String>{selectedDay};
       for (final scene in availableScenes) {
@@ -618,14 +642,11 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
         }
         final catalog =
             jsonDecode(catalogResponse.body) as Map<String, dynamic>;
-        final discovered = (catalog['scenes'] as List<dynamic>? ?? [])
-            .map((e) => Map<String, dynamic>.from(e as Map))
-            .where(
-              (e) =>
-                  (e['cloud_cover'] as num?) != null &&
-                  (e['cloud_cover'] as num) <= 30,
-            )
-            .toList();
+        final discovered = acquisitionDays(
+          (catalog['scenes'] as List<dynamic>? ?? []).map(
+            (e) => Map<String, dynamic>.from(e as Map),
+          ),
+        );
         for (final scene in discovered) {
           final d = scene['datetime']?.toString();
           if (d != null && d.length >= 10) dates.add(d.substring(0, 10));
@@ -797,13 +818,11 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
         throw Exception('HTTP ${response.statusCode}: ${response.body}');
       }
       final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      final scenes = (decoded['scenes'] as List<dynamic>? ?? [])
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .where(
-            (scene) =>
-                ((scene['cloud_cover'] as num?)?.toDouble() ?? 101) <= 30,
-          )
-          .toList();
+      final scenes = acquisitionDays(
+        (decoded['scenes'] as List<dynamic>? ?? []).map(
+          (e) => Map<String, dynamic>.from(e as Map),
+        ),
+      );
       if (!mounted ||
           requestId != satelliteRequestId ||
           selectedId != parcel.id) {
@@ -814,6 +833,7 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
         satelliteBusy = false;
         if (scenes.isNotEmpty) {
           satelliteDate = DateTime.parse(scenes.first['datetime'].toString());
+          satelliteDateChosen = true;
         } else {
           satelliteError = 'Nessuna acquisizione con nuvolosità della scena ≤30% negli ultimi 90 giorni.';
         }
@@ -830,6 +850,19 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
   Future<void> loadSatelliteOverlay() async {
     final parcel = selectedParcel;
     if (parcel == null || satelliteBusy || indexLayer == 'Nessuno') return;
+    if (!satelliteDateChosen) {
+      if (availableScenes.isEmpty) {
+        await searchSatelliteScenes();
+      } else {
+        setState(() {
+          satelliteDate = DateTime.parse(
+            availableScenes.first['datetime'].toString(),
+          );
+          satelliteDateChosen = true;
+        });
+      }
+      if (!mounted || selectedId != parcel.id || !satelliteDateChosen) return;
+    }
     final requestId = ++satelliteRequestId;
     final day =
         '${satelliteDate.year.toString().padLeft(4, '0')}-${satelliteDate.month.toString().padLeft(2, '0')}-${satelliteDate.day.toString().padLeft(2, '0')}';
@@ -869,6 +902,7 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
         overlayParcelId = parcel.id;
         satelliteBusy = false;
       });
+      await loadSatelliteStatistics();
     } catch (e) {
       if (!mounted || requestId != satelliteRequestId) return;
       setState(() {
@@ -1162,6 +1196,7 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
         clearSatelliteOverlay();
         clearWeather();
         availableScenes = [];
+        satelliteDateChosen = false;
       }
       selectedId = parcel.id;
     });
@@ -1186,6 +1221,26 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
           children: [Icon(Icons.grass), SizedBox(width: 10), Text('AgroPlan')],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Verifica collegamenti',
+            icon: const Icon(Icons.hub_outlined),
+            onPressed: () {
+              final points = selectedParcel?.points;
+              showDialog<void>(
+                context: context,
+                builder: (_) => IntegrationsDialog(
+                  latitude: points == null || points.isEmpty
+                      ? 44.65
+                      : points.map((p) => p.latitude).reduce((a, b) => a + b) /
+                            points.length,
+                  longitude: points == null || points.isEmpty
+                      ? 11.18
+                      : points.map((p) => p.longitude).reduce((a, b) => a + b) /
+                            points.length,
+                ),
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Sincronizza particelle',
             onPressed: syncing ? null : syncParcels,
@@ -1631,9 +1686,16 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
                 key: ValueKey(
-                  'scenes-${selected.id}-${availableScenes.length}',
+                  'scenes-${selected.id}-${availableScenes.map((s) => s['datetime']).join(',')}-${formatSatelliteDate(satelliteDate)}',
                 ),
-                initialValue: satelliteDate.toIso8601String().substring(0, 10),
+                initialValue:
+                    availableScenes.any(
+                      (s) =>
+                          s['datetime'].toString().substring(0, 10) ==
+                          formatSatelliteDate(satelliteDate),
+                    )
+                    ? formatSatelliteDate(satelliteDate)
+                    : null,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Acquisizione',
@@ -1651,6 +1713,7 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
                   if (v != null) {
                     setState(() {
                       satelliteDate = DateTime.parse(v);
+                      satelliteDateChosen = true;
                       clearSatelliteOverlay();
                     });
                   }
@@ -1671,6 +1734,7 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
                         if (picked != null) {
                           setState(() {
                             satelliteDate = picked;
+                            satelliteDateChosen = true;
                             clearSatelliteOverlay();
                           });
                         }
