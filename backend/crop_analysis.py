@@ -72,12 +72,15 @@ def build_crop_review(crop, soil, satellite, windows=None, geometry_available=Fa
         checks.append({'title': 'Verifica la disponibilità idrica in campo',
                        'evidence': f'Precipitazioni meno ET₀ negli ultimi 7 giorni: {balance:.1f} mm.',
                        'action': 'Controlla umidità del suolo e irrigazioni. Questo bilancio climatico non misura lo stress idrico né determina una dose irrigua.'})
-    return {'generated_at': datetime.now(timezone.utc).isoformat(),
+    review = {'generated_at': datetime.now(timezone.utc).isoformat(),
             'summary': f"{(crop or {}).get('crop', 'Coltura non registrata')}: {sum(quality.values())} ambiti con dati su {len(quality)}. " + ('Sono necessari nuovi rilievi per completare la valutazione.' if gaps else 'Confronta gli indicatori con i rilievi in campo.'),
             'coverage': quality, 'soil_context': soil, 'satellite': ndvi,
             'checks': checks, 'missing_data': gaps,
             'method': 'Sintesi deterministica dei record aziendali e delle osservazioni disponibili; nessun dato inventato e nessun modello diagnostico o di resa.',
             'references': [{'title': 'FAO 56: ET₀ ed evapotraspirazione colturale', 'url': 'https://www.fao.org/4/x0490e/x0490e0a.htm'}]}
+
+    review['climatic_balance_7d'] = balance
+    return review
 
 
 def farm_overview(user):
@@ -92,5 +95,9 @@ def farm_overview(user):
                         'crop_context': crop_context(row['id'], None),
                         'review': build_crop_review(crop_context(row['id'], None), soil, satellite,
                                                    geometry_available=bool(payload.get('points')))})
+    from evidence_engine import integrate
+    from field_records import observations
+    for item in reviews:
+        item['review'] = integrate(item['review'], observations(item['parcel_id']))
     return {'farm_id': user.farm_id, 'parcel_count': len(reviews), 'parcels': reviews,
             'note': 'Riepilogo dei dati salvati: meteo aggiornato e nuove acquisizioni si richiedono nell’analisi della singola particella.'}

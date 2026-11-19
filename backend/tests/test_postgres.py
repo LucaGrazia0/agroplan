@@ -47,6 +47,13 @@ def test_real_postgres_persistence_ids_conflicts_and_analysis(pg_client,parcel):
     assert first.status_code==201
     assert client.post('/soil/analyses',json=soil,headers=auth).json()['id']==first.json()['id']
     assert client.get('/agronomy/overview',headers=auth).json()['parcels'][0]['review']['coverage']['soil'] is True
+    from datetime import date
+    from field_records import save_result
+    observation={'parcel_id':'field-1','observed_at':date.today().isoformat(),'symptoms':['spots'],'notes':'Rilievo di prova'}
+    assert client.put('/observations/'+str(uuid.uuid4()),json=observation,headers=auth).status_code==200
+    assert len(client.get('/observations?parcel_id=field-1',headers=auth).json())==1
+    save_result('field-1',{'parcel_id':'field-1','crop_review':{'summary':'Test PostgreSQL'}})
+    assert len(client.get('/agronomy/results?parcel_id=field-1',headers=auth).json())==1
     assert client.post('/auth/logout',headers=auth).status_code==204
     assert client.get('/parcels',headers=auth).status_code==401
 

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import 'api.dart' as http;
+import 'results_history.dart';
 
 class AgronomyPanel extends StatefulWidget {
   const AgronomyPanel({
@@ -12,6 +13,7 @@ class AgronomyPanel extends StatefulWidget {
     required this.longitude,
     required this.baseUrl,
     this.revision = 0,
+    this.onResultSaved,
   });
 
   final String parcelId;
@@ -19,6 +21,7 @@ class AgronomyPanel extends StatefulWidget {
   final double longitude;
   final String baseUrl;
   final int revision;
+  final VoidCallback? onResultSaved;
 
   @override
   State<AgronomyPanel> createState() => _AgronomyPanelState();
@@ -100,6 +103,7 @@ class _AgronomyPanelState extends State<AgronomyPanel> {
       setState(() {
         result = data;
       });
+      widget.onResultSaved?.call();
     } catch (e) {
       if (!mounted || version != requestVersion) return;
       setState(() {
@@ -306,7 +310,7 @@ class _AgronomyPanelState extends State<AgronomyPanel> {
               children: [
                 const Expanded(
                   child: Text(
-                    'Analisi colturale',
+                    'Risultati dell’analisi',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -350,6 +354,8 @@ class _AgronomyPanelState extends State<AgronomyPanel> {
             ],
             if (data != null) ...[
               if (review is Map) ...[
+                if (review['integrated_assessment'] is Map)
+                  AssessmentView(data: review['integrated_assessment']),
                 const Divider(height: 24),
                 Text('${review['summary']}'),
                 for (final check in (review['checks'] as List? ?? []))

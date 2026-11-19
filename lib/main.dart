@@ -19,6 +19,8 @@ import 'login_page.dart';
 import 'integrations_dialog.dart';
 import 'satellite_scenes.dart';
 import 'crop_overview.dart';
+import 'field_observations.dart';
+import 'results_history.dart';
 
 part 'parcel_sync.dart';
 
@@ -151,6 +153,8 @@ class AgroPlanHome extends StatefulWidget {
 }
 
 class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
+  int parcelSection = 0;
+  int resultsRevision = 0;
   final mapController = MapController();
   final drawingPoints = <LatLng>[];
   bool drawing = false;
@@ -1299,6 +1303,9 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
                   options: MapOptions(
                     initialCenter: const LatLng(44.65, 11.20),
                     initialZoom: 11,
+                    interactionOptions: const InteractionOptions(
+                      flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                    ),
                     onTap: handleMapTap,
                   ),
                   children: [
@@ -1575,254 +1582,285 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
             const Text(
               'Salvataggio della particella sul server in attesa. Premi Sincronizza se la rete è disponibile.',
             ),
-          if (selected.revision > 0)
-            CropPanel(
-              key: ValueKey('crop-${selected.id}'),
-              parcelId: selected.id,
-              baseUrl: copernicusBaseUrl,
-              onChanged: () => setState(() => agronomyRevision++),
-              onCropChanged: (crop) {
-                changeCrop(selected, crop);
-              },
-            ),
-          const SizedBox(height: 12),
-          if (selected.points.isNotEmpty && selected.revision > 0)
-            SoilPanel(
-              key: ValueKey('soil-${selected.id}'),
-              parcelId: selected.id,
-              revision: '${selected.soil}-$soilRevision',
-              latitude:
-                  selected.points
-                      .map((p) => p.latitude)
-                      .reduce((a, b) => a + b) /
-                  selected.points.length,
-              longitude:
-                  selected.points
-                      .map((p) => p.longitude)
-                      .reduce((a, b) => a + b) /
-                  selected.points.length,
-              points: selected.points
-                  .map((p) => {'lat': p.latitude, 'lng': p.longitude})
-                  .toList(),
-            ),
-
-          if (selected.points.isNotEmpty && selected.revision > 0)
-            AgronomyPanel(
-              key: ValueKey('agronomy-${selected.id}'),
-              revision: agronomyRevision,
-              parcelId: selected.id,
-              baseUrl: copernicusBaseUrl,
-              latitude:
-                  selected.points
-                      .map((p) => p.latitude)
-                      .reduce((a, b) => a + b) /
-                  selected.points.length,
-              longitude:
-                  selected.points
-                      .map((p) => p.longitude)
-                      .reduce((a, b) => a + b) /
-                  selected.points.length,
-            ),
-          const SizedBox(height: 12),
-          Text(selected.name, style: const TextStyle(fontSize: 18)),
-          const SizedBox(height: 8),
-          Text('Superficie: ${selected.hectares.toStringAsFixed(3)} ha'),
-          const SizedBox(height: 16),
-          DropdownButtonFormField<String>(
-            key: ValueKey(selected.id),
-            initialValue: selected.crop,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Coltura',
-              border: OutlineInputBorder(),
-            ),
-            items: crops
-                .map((crop) => DropdownMenuItem(value: crop, child: Text(crop)))
-                .toList(),
-            onChanged: (value) {
-              if (value != null) changeCrop(selected, value);
-            },
+          SegmentedButton<int>(
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(value: 0, label: Text('Risultati')),
+              ButtonSegment(value: 1, label: Text('Rilievi')),
+              ButtonSegment(value: 2, label: Text('Dati')),
+            ],
+            selected: {parcelSection},
+            onSelectionChanged: (value) =>
+                setState(() => parcelSection = value.first),
           ),
           const SizedBox(height: 16),
-          FilledButton.tonalIcon(
-            onPressed: editingVertices ? stopEditing : startEditing,
-            icon: const Icon(Icons.edit_location_alt),
-            label: Text(
-              editingVertices ? 'Termina modifica confini' : 'Modifica vertici',
-            ),
-          ),
-          if (editingVertices) ...[
-            const SizedBox(height: 8),
-            const Text(
-              'Tocca un vertice sulla mappa, poi tocca la nuova posizione. Pressione lunga sul vertice per eliminarlo (minimo 3).',
-            ),
-            for (int i = 0; i < selected.points.length; i++)
-              TextButton.icon(
-                onPressed: () => addVertexAtMidpoint(i),
-                icon: const Icon(Icons.add_location_alt_outlined),
-                label: Text('Aggiungi vertice dopo ${i + 1}'),
+          if (parcelSection == 0) ...[
+            if (selected.points.isNotEmpty && selected.revision > 0)
+              AgronomyPanel(
+                key: ValueKey('agronomy-${selected.id}'),
+                revision: agronomyRevision,
+                onResultSaved: () {
+                  if (mounted) setState(() => resultsRevision++);
+                },
+                parcelId: selected.id,
+                baseUrl: copernicusBaseUrl,
+                latitude:
+                    selected.points
+                        .map((p) => p.latitude)
+                        .reduce((a, b) => a + b) /
+                    selected.points.length,
+                longitude:
+                    selected.points
+                        .map((p) => p.longitude)
+                        .reduce((a, b) => a + b) /
+                    selected.points.length,
+              ),
+            if (selected.revision > 0)
+              ResultsHistory(
+                key: ValueKey('results-${selected.id}'),
+                parcelId: selected.id,
+                revision: resultsRevision,
               ),
           ],
-          const SizedBox(height: 18),
-          const Text(
-            'Analisi satellitare Copernicus',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          DropdownButtonFormField<String>(
-            key: ValueKey('satellite-$indexLayer'),
-            initialValue: indexLayer,
-            decoration: const InputDecoration(
-              labelText: 'Indice satellitare',
-              border: OutlineInputBorder(),
+          if (parcelSection == 1 && selected.revision > 0)
+            FieldObservations(
+              key: ValueKey('observations-${selected.id}'),
+              parcelId: selected.id,
+              onChanged: () => setState(() => agronomyRevision++),
             ),
-            items: const [
-              'Nessuno',
-              'NDVI',
-              'DVI',
-            ].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
-            onChanged: (v) {
-              if (v != null) {
-                setState(() {
-                  indexLayer = v;
-                  clearSatelliteOverlay();
-                });
-              }
-            },
-          ),
-          if (indexLayer != 'Nessuno') ...[
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: satelliteBusy ? null : searchSatelliteScenes,
-              icon: const Icon(Icons.satellite_alt),
-              label: const Text('Cerca acquisizioni Sentinel-2'),
-            ),
-            if (availableScenes.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                key: ValueKey(
-                  'scenes-${selected.id}-${availableScenes.map((s) => s['datetime']).join(',')}-${formatSatelliteDate(satelliteDate)}',
-                ),
-                initialValue:
-                    availableScenes.any(
-                      (s) =>
-                          s['datetime'].toString().substring(0, 10) ==
-                          formatSatelliteDate(satelliteDate),
-                    )
-                    ? formatSatelliteDate(satelliteDate)
-                    : null,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'Acquisizione',
-                  border: OutlineInputBorder(),
-                ),
-                items: availableScenes.map((scene) {
-                  final date = scene['datetime'].toString().substring(0, 10);
-                  final clouds = scene['cloud_cover'];
-                  return DropdownMenuItem(
-                    value: date,
-                    child: Text('$date · nuvole $clouds%'),
-                  );
-                }).toList(),
-                onChanged: (v) {
-                  if (v != null) {
-                    setState(() {
-                      satelliteDate = DateTime.parse(v);
-                      satelliteDateChosen = true;
-                      clearSatelliteOverlay();
-                    });
-                  }
+          if (parcelSection == 2) ...[
+            if (selected.revision > 0)
+              CropPanel(
+                key: ValueKey('crop-${selected.id}'),
+                parcelId: selected.id,
+                baseUrl: copernicusBaseUrl,
+                onChanged: () => setState(() => agronomyRevision++),
+                onCropChanged: (crop) {
+                  changeCrop(selected, crop);
                 },
               ),
-            ] else ...[
+            const SizedBox(height: 12),
+            if (selected.points.isNotEmpty && selected.revision > 0)
+              SoilPanel(
+                key: ValueKey('soil-${selected.id}'),
+                parcelId: selected.id,
+                revision: '${selected.soil}-$soilRevision',
+                latitude:
+                    selected.points
+                        .map((p) => p.latitude)
+                        .reduce((a, b) => a + b) /
+                    selected.points.length,
+                longitude:
+                    selected.points
+                        .map((p) => p.longitude)
+                        .reduce((a, b) => a + b) /
+                    selected.points.length,
+                points: selected.points
+                    .map((p) => {'lat': p.latitude, 'lng': p.longitude})
+                    .toList(),
+              ),
+
+            const SizedBox(height: 12),
+            Text(selected.name, style: const TextStyle(fontSize: 18)),
+            const SizedBox(height: 8),
+            Text('Superficie: ${selected.hectares.toStringAsFixed(3)} ha'),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              key: ValueKey(selected.id),
+              initialValue: selected.crop,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Coltura',
+                border: OutlineInputBorder(),
+              ),
+              items: crops
+                  .map(
+                    (crop) => DropdownMenuItem(value: crop, child: Text(crop)),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) changeCrop(selected, value);
+              },
+            ),
+            const SizedBox(height: 16),
+            FilledButton.tonalIcon(
+              onPressed: editingVertices ? stopEditing : startEditing,
+              icon: const Icon(Icons.edit_location_alt),
+              label: Text(
+                editingVertices
+                    ? 'Termina modifica confini'
+                    : 'Modifica vertici',
+              ),
+            ),
+            if (editingVertices) ...[
               const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: satelliteBusy
-                    ? null
-                    : () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: satelliteDate,
-                          firstDate: DateTime(2017),
-                          lastDate: DateTime.now(),
-                        );
-                        if (picked != null) {
-                          setState(() {
-                            satelliteDate = picked;
-                            satelliteDateChosen = true;
-                            clearSatelliteOverlay();
-                          });
-                        }
-                      },
-                icon: const Icon(Icons.calendar_month),
-                label: Text(
-                  'Data: ${satelliteDate.day}/${satelliteDate.month}/${satelliteDate.year}',
+              const Text(
+                'Tocca un vertice sulla mappa, poi tocca la nuova posizione. Pressione lunga sul vertice per eliminarlo (minimo 3).',
+              ),
+              for (int i = 0; i < selected.points.length; i++)
+                TextButton.icon(
+                  onPressed: () => addVertexAtMidpoint(i),
+                  icon: const Icon(Icons.add_location_alt_outlined),
+                  label: Text('Aggiungi vertice dopo ${i + 1}'),
                 ),
+            ],
+            const SizedBox(height: 18),
+            const Text(
+              'Analisi satellitare Copernicus',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              key: ValueKey('satellite-$indexLayer'),
+              initialValue: indexLayer,
+              decoration: const InputDecoration(
+                labelText: 'Indice satellitare',
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                'Nessuno',
+                'NDVI',
+                'DVI',
+              ].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+              onChanged: (v) {
+                if (v != null) {
+                  setState(() {
+                    indexLayer = v;
+                    clearSatelliteOverlay();
+                  });
+                }
+              },
+            ),
+            if (indexLayer != 'Nessuno') ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: satelliteBusy ? null : searchSatelliteScenes,
+                icon: const Icon(Icons.satellite_alt),
+                label: const Text('Cerca acquisizioni Sentinel-2'),
+              ),
+              if (availableScenes.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  key: ValueKey(
+                    'scenes-${selected.id}-${availableScenes.map((s) => s['datetime']).join(',')}-${formatSatelliteDate(satelliteDate)}',
+                  ),
+                  initialValue:
+                      availableScenes.any(
+                        (s) =>
+                            s['datetime'].toString().substring(0, 10) ==
+                            formatSatelliteDate(satelliteDate),
+                      )
+                      ? formatSatelliteDate(satelliteDate)
+                      : null,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Acquisizione',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: availableScenes.map((scene) {
+                    final date = scene['datetime'].toString().substring(0, 10);
+                    final clouds = scene['cloud_cover'];
+                    return DropdownMenuItem(
+                      value: date,
+                      child: Text('$date · nuvole $clouds%'),
+                    );
+                  }).toList(),
+                  onChanged: (v) {
+                    if (v != null) {
+                      setState(() {
+                        satelliteDate = DateTime.parse(v);
+                        satelliteDateChosen = true;
+                        clearSatelliteOverlay();
+                      });
+                    }
+                  },
+                ),
+              ] else ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: satelliteBusy
+                      ? null
+                      : () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: satelliteDate,
+                            firstDate: DateTime(2017),
+                            lastDate: DateTime.now(),
+                          );
+                          if (picked != null) {
+                            setState(() {
+                              satelliteDate = picked;
+                              satelliteDateChosen = true;
+                              clearSatelliteOverlay();
+                            });
+                          }
+                        },
+                  icon: const Icon(Icons.calendar_month),
+                  label: Text(
+                    'Data: ${satelliteDate.day}/${satelliteDate.month}/${satelliteDate.year}',
+                  ),
+                ),
+              ],
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: satelliteBusy ? null : loadSatelliteOverlay,
+                icon: const Icon(Icons.layers),
+                label: Text('Visualizza $indexLayer sulla mappa'),
+              ),
+              if (overlayPng != null && overlayParcelId == selected.id)
+                TextButton.icon(
+                  onPressed: () => setState(clearSatelliteOverlay),
+                  icon: const Icon(Icons.visibility_off),
+                  label: const Text('Nascondi immagine'),
+                ),
+              if (satelliteBusy)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: LinearProgressIndicator(),
+                ),
+              if (satelliteError != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    satelliteError!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
+              buildSatelliteStats(),
+              const SizedBox(height: 8),
+              const Text(
+                'La nuvolosità si riferisce alla scena intera. Il PNG è ritagliato sul perimetro della particella.',
+                style: TextStyle(fontSize: 12),
               ),
             ],
-            const SizedBox(height: 8),
-            FilledButton.icon(
-              onPressed: satelliteBusy ? null : loadSatelliteOverlay,
-              icon: const Icon(Icons.layers),
-              label: Text('Visualizza $indexLayer sulla mappa'),
-            ),
-            if (overlayPng != null && overlayParcelId == selected.id)
-              TextButton.icon(
-                onPressed: () => setState(clearSatelliteOverlay),
-                icon: const Icon(Icons.visibility_off),
-                label: const Text('Nascondi immagine'),
-              ),
-            if (satelliteBusy)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: LinearProgressIndicator(),
-              ),
-            if (satelliteError != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  satelliteError!,
-                  style: const TextStyle(color: Colors.red),
-                ),
-              ),
-            buildSatelliteStats(),
-            const SizedBox(height: 8),
+            const SizedBox(height: 18),
+            buildWeatherPanel(selected),
+            const SizedBox(height: 18),
             const Text(
-              'La nuvolosità si riferisce alla scena intera. Il PNG è ritagliato sul perimetro della particella.',
-              style: TextStyle(fontSize: 12),
+              'Analisi del terreno',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
+            const SizedBox(height: 8),
+            if (selected.soil.isEmpty) const Text('Nessuna analisi inserita.'),
+            for (final entry in selected.soil.entries)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 5),
+                child: Text('${entry.key}: ${entry.value}'),
+              ),
+            const SizedBox(height: 8),
+            FilledButton.tonalIcon(
+              onPressed: () => editSoil(selected),
+              icon: const Icon(Icons.science_outlined),
+              label: const Text('Inserisci / modifica analisi'),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: deleteSelected,
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('Elimina particella'),
+            ),
+            const SizedBox(height: 12),
           ],
-          const SizedBox(height: 18),
-          buildWeatherPanel(selected),
-          const SizedBox(height: 18),
-          const Text(
-            'Analisi del terreno',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          if (selected.soil.isEmpty) const Text('Nessuna analisi inserita.'),
-          for (final entry in selected.soil.entries)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 5),
-              child: Text('${entry.key}: ${entry.value}'),
-            ),
-          const SizedBox(height: 8),
-          FilledButton.tonalIcon(
-            onPressed: () => editSoil(selected),
-            icon: const Icon(Icons.science_outlined),
-            label: const Text('Inserisci / modifica analisi'),
-          ),
-          const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: deleteSelected,
-            icon: const Icon(Icons.delete_outline),
-            label: const Text('Elimina particella'),
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Prossimamente: analisi del suolo, meteo, fenologia e immagini satellitari.',
-            style: TextStyle(color: Colors.grey),
-          ),
         ],
       ],
     ),

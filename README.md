@@ -151,3 +151,9 @@ python backend/transfer.py backup --output .local/backups/cloud.json
 ```
 
 Il codice va copiato dal file privato nel campo **Codice di abbinamento** dell’iPhone una sola volta. Non inserirlo in chat. Per PostgreSQL usare il backup JSON di `transfer.py`; il comando `manage.py backup` è riservato a SQLite.
+
+## Rilievi visivi e risultati (1.2.0)
+
+La scheda della particella è divisa in Risultati, Rilievi e Dati. I rilievi comprendono data, sintomi, parte della pianta, intensità, percentuale interessata e note; le bozze vengono conservate sul dispositivo e gli invii sono idempotenti. La mappa permette zoom e spostamento ma non rotazione.
+
+Ogni analisi conserva una fotografia dei risultati, consultabile nello storico. Il motore integra i rilievi degli ultimi 14 giorni con gli indicatori colturali e ambientali. I termini nelle note sono indizi da confermare: non sono una diagnosi automatica. Evidenze, ipotesi e domande per il sopralluogo sono separate. Nessun testo o dato viene inviato a un servizio AI esterno.
