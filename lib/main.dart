@@ -21,6 +21,8 @@ import 'satellite_scenes.dart';
 import 'crop_overview.dart';
 import 'field_observations.dart';
 import 'results_history.dart';
+import 'parcel_sections.dart';
+import 'water_parameters.dart';
 
 part 'parcel_sync.dart';
 
@@ -1029,7 +1031,7 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
     final data = <String, dynamic>{
       'client_id': DateTime.now().microsecondsSinceEpoch.toString(),
       'parcel_id': parcel.id,
-      'sample_date': DateTime.now().toIso8601String().substring(0, 10),
+      'sample_date': values['sample_date'],
       'source': 'laboratory',
       'ph': number('ph'),
       'nitrogen_g_kg': number('nitrogen'),
@@ -1056,6 +1058,7 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
 
   Future<void> editSoil(FarmParcel parcel) async {
     final fields = <String, String>{
+      'sample_date': 'Data campione (AAAA-MM-GG)',
       'texture': 'Tessitura (es. franco-argillosa)',
       'ph': 'pH',
       'organic': 'Sostanza organica (%)',
@@ -1095,10 +1098,22 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
                       labelText: entry.value,
                       border: const OutlineInputBorder(),
                     ),
-                    keyboardType: entry.key == 'texture' || entry.key == 'notes'
+                    keyboardType:
+                        ['texture', 'notes', 'sample_date'].contains(entry.key)
                         ? TextInputType.text
                         : const TextInputType.numberWithOptions(decimal: true),
                     validator: (value) {
+                      if (entry.key == 'sample_date') {
+                        final text = (value ?? '').trim();
+                        final d = DateTime.tryParse(text);
+                        if (d == null ||
+                            !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(text) ||
+                            d.toIso8601String().substring(0, 10) != text ||
+                            d.isAfter(DateTime.now())) {
+                          return 'Indica la data effettiva del campione';
+                        }
+                        return null;
+                      }
                       if (value == null ||
                           value.trim().isEmpty ||
                           entry.key == 'texture' ||
@@ -1108,7 +1123,9 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
                       final number = double.tryParse(
                         value.trim().replaceAll(',', '.'),
                       );
-                      if (number == null) return 'Inserisci un numero valido';
+                      if (number == null || !number.isFinite) {
+                        return 'Inserisci un numero valido';
+                      }
                       if (entry.key == 'ph' && (number < 0 || number > 14)) {
                         return 'Il pH deve essere tra 0 e 14';
                       }
@@ -1582,64 +1599,97 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
             const Text(
               'Salvataggio della particella sul server in attesa. Premi Sincronizza se la rete è disponibile.',
             ),
-          SegmentedButton<int>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(value: 0, label: Text('Risultati')),
-              ButtonSegment(value: 1, label: Text('Rilievi')),
-              ButtonSegment(value: 2, label: Text('Dati')),
-            ],
-            selected: {parcelSection},
-            onSelectionChanged: (value) =>
-                setState(() => parcelSection = value.first),
+          ParcelSections(
+            selected: parcelSection,
+            onChanged: (value) => setState(() => parcelSection = value),
           ),
           const SizedBox(height: 16),
-          if (parcelSection == 0) ...[
-            if (selected.points.isNotEmpty && selected.revision > 0)
-              AgronomyPanel(
-                key: ValueKey('agronomy-${selected.id}'),
-                revision: agronomyRevision,
-                onResultSaved: () {
-                  if (mounted) setState(() => resultsRevision++);
-                },
-                parcelId: selected.id,
-                baseUrl: copernicusBaseUrl,
-                latitude:
-                    selected.points
-                        .map((p) => p.latitude)
-                        .reduce((a, b) => a + b) /
-                    selected.points.length,
-                longitude:
-                    selected.points
-                        .map((p) => p.longitude)
-                        .reduce((a, b) => a + b) /
-                    selected.points.length,
+          if (parcelSection == 1) ...[
+            const SizedBox(height: 18),
+            const Text(
+              'Referto di laboratorio',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            if (selected.soil.isEmpty) const Text('Nessuna analisi inserita.'),
+            for (final entry in selected.soil.entries)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 5),
+                child: Text(
+                  '${const {'sample_date': 'Data campione', 'texture': 'Tessitura', 'ph': 'pH', 'organic': 'Sostanza organica (%)', 'sand': 'Sabbia (%)', 'silt': 'Limo (%)', 'clay': 'Argilla (%)', 'nitrogen': 'Azoto totale (g/kg)', 'phosphorus': 'Fosforo (mg/kg)', 'potassium': 'Potassio (mg/kg)', 'cec': 'CSC', 'notes': 'Note'}[entry.key] ?? entry.key}: ${entry.value}',
+                ),
               ),
+            const SizedBox(height: 8),
+            FilledButton.tonalIcon(
+              onPressed: () => editSoil(selected),
+              icon: const Icon(Icons.science_outlined),
+              label: const Text('Inserisci / modifica analisi'),
+            ),
+
             if (selected.revision > 0)
-              ResultsHistory(
-                key: ValueKey('results-${selected.id}'),
+              WaterParametersPanel(
+                key: ValueKey('soil-water-${selected.id}'),
                 parcelId: selected.id,
-                revision: resultsRevision,
+                weather: false,
+                onSaved: () => setState(() => agronomyRevision++),
               ),
           ],
-          if (parcelSection == 1 && selected.revision > 0)
+          if (parcelSection == 2) ...[
+            buildWeatherPanel(selected),
+            const SizedBox(height: 12),
+            if (selected.revision > 0)
+              WaterParametersPanel(
+                key: ValueKey('weather-water-${selected.id}'),
+                parcelId: selected.id,
+                weather: true,
+                onSaved: () => setState(() => agronomyRevision++),
+              ),
+          ],
+          if (parcelSection == 3 && selected.revision > 0)
             FieldObservations(
               key: ValueKey('observations-${selected.id}'),
               parcelId: selected.id,
               onChanged: () => setState(() => agronomyRevision++),
             ),
-          if (parcelSection == 2) ...[
-            if (selected.revision > 0)
-              CropPanel(
-                key: ValueKey('crop-${selected.id}'),
-                parcelId: selected.id,
-                baseUrl: copernicusBaseUrl,
-                onChanged: () => setState(() => agronomyRevision++),
-                onCropChanged: (crop) {
-                  changeCrop(selected, crop);
-                },
-              ),
+          if (parcelSection <= 3 &&
+              selected.points.isNotEmpty &&
+              selected.revision > 0)
+            AgronomyPanel(
+              key: ValueKey('agronomy-${selected.id}'),
+              revision: agronomyRevision,
+              section: parcelSection,
+              onResultSaved: () {
+                if (mounted) setState(() => resultsRevision++);
+              },
+              parcelId: selected.id,
+              baseUrl: copernicusBaseUrl,
+              latitude:
+                  selected.points
+                      .map((p) => p.latitude)
+                      .reduce((a, b) => a + b) /
+                  selected.points.length,
+              longitude:
+                  selected.points
+                      .map((p) => p.longitude)
+                      .reduce((a, b) => a + b) /
+                  selected.points.length,
+            ),
+
+          if (parcelSection == 0 && selected.revision > 0)
+            ResultsHistory(
+              key: ValueKey('results-${selected.id}'),
+              parcelId: selected.id,
+              revision: resultsRevision,
+            ),
+          if (parcelSection == 1) ...[
             const SizedBox(height: 12),
+            const Text(
+              'Cartografia del suolo',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const Text(
+              'Le fonti geografiche restano distinte dal referto di laboratorio.',
+            ),
             if (selected.points.isNotEmpty && selected.revision > 0)
               SoilPanel(
                 key: ValueKey('soil-${selected.id}'),
@@ -1659,29 +1709,24 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
                     .map((p) => {'lat': p.latitude, 'lng': p.longitude})
                     .toList(),
               ),
-
+          ],
+          if (parcelSection == 4) ...[
+            if (selected.revision > 0)
+              CropPanel(
+                key: ValueKey('crop-${selected.id}'),
+                parcelId: selected.id,
+                baseUrl: copernicusBaseUrl,
+                onChanged: () => setState(() => agronomyRevision++),
+                onCropChanged: (crop) {
+                  changeCrop(selected, crop);
+                },
+              ),
+          ],
+          if (parcelSection == 5) ...[
             const SizedBox(height: 12),
             Text(selected.name, style: const TextStyle(fontSize: 18)),
             const SizedBox(height: 8),
             Text('Superficie: ${selected.hectares.toStringAsFixed(3)} ha'),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              key: ValueKey(selected.id),
-              initialValue: selected.crop,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: 'Coltura',
-                border: OutlineInputBorder(),
-              ),
-              items: crops
-                  .map(
-                    (crop) => DropdownMenuItem(value: crop, child: Text(crop)),
-                  )
-                  .toList(),
-              onChanged: (value) {
-                if (value != null) changeCrop(selected, value);
-              },
-            ),
             const SizedBox(height: 16),
             FilledButton.tonalIcon(
               onPressed: editingVertices ? stopEditing : startEditing,
@@ -1833,27 +1878,8 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
                 style: TextStyle(fontSize: 12),
               ),
             ],
-            const SizedBox(height: 18),
-            buildWeatherPanel(selected),
-            const SizedBox(height: 18),
-            const Text(
-              'Analisi del terreno',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            if (selected.soil.isEmpty) const Text('Nessuna analisi inserita.'),
-            for (final entry in selected.soil.entries)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text('${entry.key}: ${entry.value}'),
-              ),
-            const SizedBox(height: 8),
-            FilledButton.tonalIcon(
-              onPressed: () => editSoil(selected),
-              icon: const Icon(Icons.science_outlined),
-              label: const Text('Inserisci / modifica analisi'),
-            ),
-            const SizedBox(height: 16),
+
+            const Divider(height: 32),
             OutlinedButton.icon(
               onPressed: deleteSelected,
               icon: const Icon(Icons.delete_outline),

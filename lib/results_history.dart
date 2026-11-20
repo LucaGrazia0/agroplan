@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import 'api.dart' as api;
+import 'analysis_report.dart';
 
 class AssessmentView extends StatelessWidget {
   const AssessmentView({super.key, required this.data});
@@ -119,7 +120,10 @@ class _ResultsHistoryState extends State<ResultsHistory> {
             '${row['crop_review']?['summary'] ?? 'Analisi colturale'}',
           ),
           children: [
-            if (row['crop_review']?['integrated_assessment'] is Map)
+            if (row['crop_review']?['manual_assessment'] is Map)
+              SavedAnalysisView(data: row),
+            if (row['crop_review']?['manual_assessment'] == null &&
+                row['crop_review']?['integrated_assessment'] is Map)
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: AssessmentView(
@@ -129,5 +133,39 @@ class _ResultsHistoryState extends State<ResultsHistory> {
           ],
         ),
     ],
+  );
+}
+
+class SavedAnalysisView extends StatefulWidget {
+  const SavedAnalysisView({super.key, required this.data});
+  final Map data;
+  @override
+  State<SavedAnalysisView> createState() => _SavedAnalysisViewState();
+}
+
+class _SavedAnalysisViewState extends State<SavedAnalysisView> {
+  int section = 0;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.all(12),
+    child: Column(
+      children: [
+        DropdownButtonFormField<int>(
+          initialValue: section,
+          decoration: const InputDecoration(
+            labelText: 'Sezione del risultato salvato',
+          ),
+          items: const [
+            DropdownMenuItem(value: 0, child: Text('Sintesi')),
+            DropdownMenuItem(value: 1, child: Text('Suolo')),
+            DropdownMenuItem(value: 2, child: Text('Meteo')),
+            DropdownMenuItem(value: 3, child: Text('Problematiche')),
+          ],
+          onChanged: (v) => setState(() => section = v ?? 0),
+        ),
+        const SizedBox(height: 12),
+        AnalysisReport(data: widget.data, section: section),
+      ],
+    ),
   );
 }

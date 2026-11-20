@@ -6,15 +6,34 @@ LABELS={'yellowing':'Ingiallimento','wilting':'Appassimento','spots':'Macchie su
 TERMS={'yellowing':r'ingiall|foglie gialle','wilting':r'appass|avvizz','spots':r'macchi','insects':r'insett|afidi|larve','uneven_growth':r'crescita irregolare|sviluppo irregolare'}
 
 
-def integrate(review,records,today=None):
+def note_signs(text):
+    """Conservative keyword candidates, never diagnoses or confirmed findings.
+
+    Contrast clauses are independent: 'non vedo afidi, ma vedo macchie'
+    should not suppress the positive report. Negation stays local to a sign.
+    """
+    candidates=set()
+    clauses=re.split(r'[.;,\n]|\b(?:ma|però|tuttavia)\b',text,flags=re.I)
+    for key,pattern in TERMS.items():
+        for clause in clauses:
+            match=re.search(pattern,clause,re.I)
+            if not match: continue
+            before=' '.join(clause[:match.start()].split()[-5:])
+            after=clause[match.end():]
+            if re.search(r'\b(no|non|senza|nessun[oa]?|assenza)\b',before,re.I): continue
+            if re.search(r'^\w*\s+(assent\w*|non\s+present\w*)\b',after,re.I): continue
+            candidates.add(key)
+    return candidates
+
+
+def integrate(review,records,today=None,crop=None,windows=None,parameters=None):
     today=today or date.today()
-    recent=[r for r in records if 0 <= (today-date.fromisoformat(r['observed_at'])).days <= 14]
+    recent=sorted([r for r in records if 0 <= (today-date.fromisoformat(r['observed_at'])).days <= 14], key=lambda r:(r['observed_at'],r.get('created_at','')),reverse=True)
     evidence=[]; hypotheses=[]; questions=[]
     latest=recent[0] if recent else None
     if latest:
         explicit=set(latest['symptoms'])
-        clauses=re.split(r'[.;\n]',latest.get('notes',''))
-        inferred={key for key,pattern in TERMS.items() if any(re.search(pattern,clause,re.I) and not re.search(r'\b(no|non|senza|nessun[oa]?|assenza)\b',clause,re.I) for clause in clauses)}
+        inferred=note_signs(latest.get('notes',''))
         if 'no_symptoms' in explicit and inferred:
             questions.append('La nota descrive possibili sintomi ma il rilievo indica assenza di sintomi: verifica il testo prima di interpretarlo.')
             inferred=set()
@@ -46,4 +65,6 @@ def integrate(review,records,today=None):
     review['visual_context']={'latest':latest,'record_count':len(records),'recent_count':len(recent)}
     review['integrated_assessment']={'evidence':evidence,'hypotheses':hypotheses,'questions':questions,'method':'Regole esplicite: record strutturati e termini nelle note, confrontati con dati colturali, meteo, suolo e satellite. Le parole riconosciute vanno confermate; nessuna diagnosi automatica o dose di trattamento.'}
     review['summary']=f"{sum(review['coverage'].values())} fonti disponibili su {len(review['coverage'])}. "+('Confronta le evidenze e completa le verifiche suggerite.' if latest else 'Manca un rilievo visivo recente delle piante.')
+    from manual_engine import evaluate
+    review['manual_assessment']=evaluate(review,crop,windows,parameters,today)
     return review

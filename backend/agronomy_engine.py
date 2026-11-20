@@ -247,7 +247,8 @@ def register_agronomy_routes(app, weather_handler, weather_request_class, satell
         result['crop_review'] = build_crop_review(crop, soil, satellite, result['windows'], bool(points))
         from field_records import observations, save_result
         from evidence_engine import integrate
-        result['crop_review'] = integrate(result['crop_review'], observations(req.parcel_id))
+        from analysis_parameters import parameters
+        result['crop_review'] = integrate(result['crop_review'], observations(req.parcel_id),crop=crop,windows=result['windows'],parameters=parameters(req.parcel_id))
         response = {
             "parcel_id": req.parcel_id,
             "latitude": latitude,

@@ -54,6 +54,10 @@ def test_real_postgres_persistence_ids_conflicts_and_analysis(pg_client,parcel):
     assert len(client.get('/observations?parcel_id=field-1',headers=auth).json())==1
     save_result('field-1',{'parcel_id':'field-1','crop_review':{'summary':'Test PostgreSQL'}})
     assert len(client.get('/agronomy/results?parcel_id=field-1',headers=auth).json())==1
+    params={'observed_at':date.today().isoformat(),'field_capacity_percent':30,'wilting_point_percent':15,'root_depth_m':.8}
+    assert client.put('/agronomy/parameters/field-1',json=params,headers=auth).status_code==200
+    assert client.get('/agronomy/parameters/field-1',headers=auth).json()['root_depth_m']==.8
+    assert client.get('/agronomy/overview',headers=auth).json()['parcels'][0]['review']['manual_assessment']['parameters']['root_depth_m']==.8
     assert client.post('/auth/logout',headers=auth).status_code==204
     assert client.get('/parcels',headers=auth).status_code==401
 

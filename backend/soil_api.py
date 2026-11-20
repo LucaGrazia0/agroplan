@@ -2,13 +2,14 @@
 from datetime import date
 from fastapi import APIRouter, HTTPException
 from soil_sources import search_soil
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from storage import connect
 from auth import CurrentUser, require_parcel
 
 router = APIRouter(prefix="/soil", tags=["Soil"])
 
 class SoilAnalysis(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
     parcel_id: str = Field(min_length=1)
     sample_date: date
     source: str = "laboratory"
@@ -21,6 +22,12 @@ class SoilAnalysis(BaseModel):
     potassium_mg_kg: float | None = Field(default=None, ge=0)
     notes: str = ""
     client_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode='after')
+    def not_future(self):
+        if self.sample_date > date.today():
+            raise ValueError('La data del campione non può essere futura.')
+        return self
 
 @router.post("/analyses", status_code=201)
 def add_analysis(item: SoilAnalysis, user: CurrentUser):

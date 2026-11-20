@@ -772,6 +772,8 @@ register_crop_routes(app)
 app.include_router(soil_router)
 from field_records import router as field_router
 app.include_router(field_router)
+from analysis_parameters import router as parameters_router
+app.include_router(parameters_router)
 
 from agronomy_engine import register_agronomy_routes
 

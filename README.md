@@ -152,8 +152,17 @@ python backend/transfer.py backup --output .local/backups/cloud.json
 
 Il codice va copiato dal file privato nel campo **Codice di abbinamento** dell’iPhone una sola volta. Non inserirlo in chat. Per PostgreSQL usare il backup JSON di `transfer.py`; il comando `manage.py backup` è riservato a SQLite.
 
-## Rilievi visivi e risultati (1.2.0)
+## Sezioni e motore documentato (1.3.0)
 
-La scheda della particella è divisa in Risultati, Rilievi e Dati. I rilievi comprendono data, sintomi, parte della pianta, intensità, percentuale interessata e note; le bozze vengono conservate sul dispositivo e gli invii sono idempotenti. La mappa permette zoom e spostamento ma non rotazione.
+La scheda della particella è divisa in **Sintesi, Suolo, Meteo, Problematiche, Coltura, Mappa e satellite**. Suolo contiene referti, parametri idrici e fonti cartografiche distinte; Meteo contiene storico, previsioni e calcoli; Problematiche raccoglie rilievi e indagine dei sintomi. Cambiare categoria di un risultato già caricato non avvia una nuova analisi. La mappa permette zoom e spostamento ma non rotazione.
 
 Ogni analisi conserva una fotografia dei risultati, consultabile nello storico. Il motore integra i rilievi degli ultimi 14 giorni con gli indicatori colturali e ambientali. I termini nelle note sono indizi da confermare: non sono una diagnosi automatica. Evidenze, ipotesi e domande per il sopralluogo sono separate. Nessun testo o dato viene inviato a un servizio AI esterno.
+
+Le regole e i metodi sono implementati in `backend/manual_engine.py`; edizione e bibliografia verificata sono in `backend/agronomy_knowledge.py`. Ogni risultato include identificativo del metodo, prerequisiti, misure usate, interpretazione, verifiche successive, limiti e fonti. La bibliografia non viene eseguita né aggiornata automaticamente: una modifica richiede revisione, nuova edizione e test.
+
+- **pH:** classi descrittive della tabella 3-15 del [USDA Soil Survey Manual 2017, capitolo 3](https://www.nrcs.usda.gov/sites/default/files/2022-09/SSM-ch3.pdf), arrotondamento a un decimale. Non sono raccomandazioni di correzione o diagnosi di carenze; va confrontato il metodo analitico.
+- **Acqua disponibile:** `TAW = 1000 × (θFC − θWP) × Zr`, [FAO 56, capitolo 8, equazione 82](https://www.fao.org/4/x0490e/x0490e0e.htm). Gli input percentuali volumetrici vengono divisi per 100; la profondità radicale è in metri. Umidità opzionale: esaurimento limitato tra zero e TAW, con data della misura. Profilo assunto uniforme; non si calcolano RAW, Ks o dosi irrigue.
+- **Meteo:** P − ET₀ soltanto su una finestra completa. `ETc = Kc × ET₀` secondo [FAO 56, capitolo 6, equazione 58](https://www.fao.org/4/x0490e/x0490e0b.htm) soltanto con Kc fornito/verificato dall’operatore e valido per tutti i sette giorni. Non viene dedotto dal BBCH: clima, bagnature e fase richiedono verifica locale. ETc standard non equivale al consumo effettivo sotto stress.
+- **Problematiche:** il metodo di [CSU Extension, Diagnosing Plant Disorders](https://extension.colostate.edu/resource/diagnosing-plant-disorders/) guida raccolta dei dettagli, contesto e cause alternative. Il collegamento sintomi/meteo richiede sovrapposizione delle date. Nessun modello patogeno-specifico, soglia di trattamento o piano nutritivo regionale è implementato.
+
+I parametri facoltativi si salvano con GET/PUT `/agronomy/parameters/{parcel_id}`, con autorizzazione della particella, validazione di date e unità e migrazione additiva SQLite/PostgreSQL. Copia dei parametri, metodi e fonti rimane nel risultato immutabile. Nuovi referti richiedono la data effettiva del campione; quelli precedenti conservano i dati già registrati. I rilievi includono sintomi, intensità, percentuale e note, con bozze locali e invii idempotenti.

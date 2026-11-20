@@ -97,7 +97,8 @@ def farm_overview(user):
                                                    geometry_available=bool(payload.get('points')))})
     from evidence_engine import integrate
     from field_records import observations
+    from analysis_parameters import parameters
     for item in reviews:
-        item['review'] = integrate(item['review'], observations(item['parcel_id']))
+        item['review'] = integrate(item['review'], observations(item['parcel_id']),crop=item['crop_context'],parameters=parameters(item['parcel_id']))
     return {'farm_id': user.farm_id, 'parcel_count': len(reviews), 'parcels': reviews,
             'note': 'Riepilogo dei dati salvati: meteo aggiornato e nuove acquisizioni si richiedono nell’analisi della singola particella.'}
