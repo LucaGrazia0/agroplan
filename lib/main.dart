@@ -1611,7 +1611,10 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-            if (selected.soil.isEmpty) const Text('Nessuna analisi inserita.'),
+            if (selected.soil.isEmpty)
+              const Text(
+                'Nessun referto modificato su questo dispositivo. I campioni sincronizzati sono nello storico del suolo qui sotto.',
+              ),
             for (final entry in selected.soil.entries)
               Padding(
                 padding: const EdgeInsets.only(bottom: 5),
