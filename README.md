@@ -152,13 +152,19 @@ python backend/transfer.py backup --output .local/backups/cloud.json
 
 Il codice va copiato dal file privato nel campo **Codice di abbinamento** dell’iPhone una sola volta. Non inserirlo in chat. Per PostgreSQL usare il backup JSON di `transfer.py`; il comando `manage.py backup` è riservato a SQLite.
 
-## Analisi integrata e motore documentato (1.4.0)
+## Analisi integrata e motore documentato (1.5.0)
 
 La scheda della particella è divisa in **Analisi integrata, Suolo, Meteo, Problematiche, Coltura, Mappa e satellite**. Suolo contiene referti, parametri idrici e fonti cartografiche distinte; Meteo contiene storico, previsioni e calcoli; Problematiche raccoglie rilievi e indagine dei sintomi. Cambiare categoria di un risultato già caricato non avvia una nuova analisi. La mappa permette zoom e spostamento ma non rotazione.
 
 **Analizza tutti gli input** aggiorna il ritorno della sezione Analisi integrata: valutazione complessiva, conclusioni motivate, tre prossime verifiche prioritarie, ulteriori controlli, input effettivamente letti e dati da completare. `backend/decision_engine.py` compone i risultati documentati del motore senza aggiungere soglie diagnostiche. Confronta sintomi e meteo solo quando le date sono compatibili; distingue osservazioni strutturate, indizi testuali e assenza di dati. La priorità del sopralluogo è un criterio organizzativo dell’app, non una soglia di trattamento. L’assenza di sintomi segnalati non diventa una certificazione sanitaria. Conclusioni e azioni sono salvate nel risultato immutabile e mostrate anche nel riepilogo aziendale.
 
 L’endpoint `/agronomy/analyze` accetta entrambe le coordinate oppure nessuna. Se mancano anche i confini, analizza i soli record salvati senza attribuire meteo a una posizione presunta. I risultati precedenti conservano il loro formato e non vengono riscritti come nuove valutazioni.
+
+La versione 1.5 aggiunge un confronto descrittivo tra rilievi di giorni distinti, entro 30 giorni, con lo stesso contesto (parte della pianta, foglie e distribuzione). La variazione percentuale è espressa in **punti percentuali**, non viene trasformata in una diagnosi di peggioramento o guarigione e non cambia automaticamente la priorità. Il campionamento deve essere confrontabile. Le osservazioni discordanti dello stesso giorno restano esplicite.
+
+`backend/assessment_detail.py` espone piste concorrenti con elementi a favore, elementi che non concordano e informazioni mancanti. Una misura umida dello stesso giorno non sostiene la pista della scarsità d’acqua nel profilo; non esclude un problema radicale o di assorbimento. Piste diverse possono essere compatibili contemporaneamente e non ricevono percentuali di probabilità. Domande condizionali rimandano a Problematiche, Suolo o Coltura; lo storico mostra le stesse informazioni in sola lettura.
+
+I rilievi accettano i dettagli facoltativi `leaf_age`, `distribution`, `root_condition`, `noticed_since`. La data di comparsa non può seguire il rilievo. I dettagli sono conservati nelle bozze locali e nel payload JSON; non servono nuove tabelle. Gli invii ripetuti di vecchi rilievi restano idempotenti: i default aggiunti non riscrivono i payload storici.
 
 Ogni analisi conserva una fotografia dei risultati, consultabile nello storico. Il motore integra i rilievi degli ultimi 14 giorni con gli indicatori colturali e ambientali. I termini nelle note sono indizi da confermare: non sono una diagnosi automatica. Evidenze, ipotesi e domande per il sopralluogo sono separate. Nessun testo o dato viene inviato a un servizio AI esterno.
 

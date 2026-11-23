@@ -31,6 +31,10 @@ class _FieldObservationsState extends State<FieldObservations> {
   final notes = TextEditingController(), percent = TextEditingController();
   Set<String> symptoms = {};
   String severity = 'mild', part = 'leaves';
+  String leafAge = 'unknown',
+      distribution = 'unknown',
+      rootCondition = 'unknown';
+  DateTime? noticedSince;
   DateTime date = DateTime.now();
   List<dynamic> rows = [];
   bool busy = false, ready = false;
@@ -38,16 +42,23 @@ class _FieldObservationsState extends State<FieldObservations> {
   String get draftKey =>
       'field_draft_${api.apiBaseUrl}_${api.ApiSession.instance.farmId}_${widget.parcelId}';
   Future<void> writes = Future.value();
+  double? get affectedPercent {
+    final value = double.tryParse(percent.text.replaceAll(',', '.'));
+    return value != null && value.isFinite ? value : null;
+  }
+
   Map<String, dynamic> get payload => {
     'parcel_id': widget.parcelId,
     'observed_at': date.toIso8601String().substring(0, 10),
     'symptoms': symptoms.toList()..sort(),
     'severity': severity,
-    'affected_percent': percent.text.trim().isEmpty
-        ? null
-        : double.tryParse(percent.text.replaceAll(',', '.')),
+    'affected_percent': percent.text.trim().isEmpty ? null : affectedPercent,
     'plant_part': part,
     'notes': notes.text.trim(),
+    'leaf_age': leafAge,
+    'distribution': distribution,
+    'root_condition': rootCondition,
+    'noticed_since': noticedSince?.toIso8601String().substring(0, 10),
   };
   @override
   void initState() {
@@ -68,6 +79,12 @@ class _FieldObservationsState extends State<FieldObservations> {
           symptoms = Set<String>.from(p['symptoms']);
           severity = p['severity'];
           part = p['plant_part'];
+          leafAge = p['leaf_age']?.toString() ?? 'unknown';
+          distribution = p['distribution']?.toString() ?? 'unknown';
+          rootCondition = p['root_condition']?.toString() ?? 'unknown';
+          noticedSince = DateTime.tryParse(
+            p['noticed_since']?.toString() ?? '',
+          );
           date = DateTime.parse(p['observed_at']);
           message = 'Bozza recuperata sul dispositivo.';
         });
@@ -133,8 +150,15 @@ class _FieldObservationsState extends State<FieldObservations> {
       );
       return;
     }
-    if (percent.text.trim().isNotEmpty && (n == null || n < 0 || n > 100)) {
+    if (percent.text.trim().isNotEmpty &&
+        (n == null || !n.isFinite || n < 0 || n > 100)) {
       setState(() => message = 'Inserisci una percentuale tra 0 e 100.');
+      return;
+    }
+    if (noticedSince != null && noticedSince!.isAfter(date)) {
+      setState(
+        () => message = 'La comparsa dei sintomi deve essere precedente o uguale alla data del rilievo.',
+      );
       return;
     }
     var draftSaved = false;
@@ -162,6 +186,10 @@ class _FieldObservationsState extends State<FieldObservations> {
         notes.clear();
         percent.clear();
         symptoms = {};
+        leafAge = 'unknown';
+        distribution = 'unknown';
+        rootCondition = 'unknown';
+        noticedSince = null;
         message = 'Rilievo salvato. Lo ritrovi nello storico e nella prossima analisi.';
       });
       widget.onChanged();
@@ -327,6 +355,74 @@ class _FieldObservationsState extends State<FieldObservations> {
           draft();
         },
       ),
+      ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        title: const Text('Dettagli per migliorare l’analisi'),
+        subtitle: const Text(
+          'Facoltativi: indica solo quello che hai osservato',
+        ),
+        children: [
+          detailChoice('Foglie interessate', leafAge, {
+            'unknown': 'Non rilevato',
+            'young': 'Giovani',
+            'old': 'Vecchie',
+            'all': 'Giovani e vecchie',
+          }, (v) => leafAge = v),
+          detailChoice('Distribuzione dei sintomi', distribution, {
+            'unknown': 'Non rilevata',
+            'scattered': 'Piante isolate',
+            'patches': 'A chiazze',
+            'uniform': 'Uniforme',
+          }, (v) => distribution = v),
+          detailChoice('Aspetto delle radici', rootCondition, {
+            'unknown': 'Non osservate',
+            'normal': 'Apparentemente regolari',
+            'damaged': 'Scure o danneggiate',
+            'dry': 'Secche',
+          }, (v) => rootCondition = v),
+          TextButton.icon(
+            onPressed: busy || !ready
+                ? null
+                : () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate:
+                          noticedSince != null && !noticedSince!.isAfter(date)
+                          ? noticedSince!
+                          : date,
+                      firstDate: DateTime(2000),
+                      lastDate: date,
+                    );
+                    if (picked != null && mounted) {
+                      setState(() {
+                        id = null;
+                        noticedSince = picked;
+                      });
+                      draft();
+                    }
+                  },
+            icon: const Icon(Icons.event_outlined),
+            label: Text(
+              noticedSince == null
+                  ? 'Da quando noti i sintomi?'
+                  : 'Sintomi dal ${noticedSince!.day}/${noticedSince!.month}/${noticedSince!.year}',
+            ),
+          ),
+          if (noticedSince != null)
+            TextButton(
+              onPressed: busy
+                  ? null
+                  : () {
+                      setState(() {
+                        id = null;
+                        noticedSince = null;
+                      });
+                      draft();
+                    },
+              child: const Text('Data di comparsa non nota'),
+            ),
+        ],
+      ),
       if (message != null)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
@@ -350,10 +446,40 @@ class _FieldObservationsState extends State<FieldObservations> {
               '${row['observed_at']} · ${(row['symptoms'] as List).map((s) => symptomLabels[s] ?? s).join(', ')}',
             ),
             subtitle: Text(
-              '${row['notes']}\n${row['affected_percent'] ?? '—'}% di piante interessate',
+              '${row['notes']}\n${row['affected_percent'] ?? '—'}% di piante interessate'
+              '${row['leaf_age'] != null && row['leaf_age'] != 'unknown' ? '\nFoglie: ${const {'young': 'giovani', 'old': 'vecchie', 'all': 'giovani e vecchie'}[row['leaf_age']]}' : ''}'
+              '${row['distribution'] != null && row['distribution'] != 'unknown' ? '\nDistribuzione: ${const {'scattered': 'piante isolate', 'patches': 'a chiazze', 'uniform': 'uniforme'}[row['distribution']]}' : ''}'
+              '${row['root_condition'] != null && row['root_condition'] != 'unknown' ? '\nRadici: ${const {'normal': 'apparentemente regolari', 'damaged': 'scure o danneggiate', 'dry': 'secche'}[row['root_condition']]}' : ''}'
+              '${row['noticed_since'] != null ? '\nSintomi dal ${row['noticed_since']}' : ''}',
             ),
           ),
         ),
     ],
+  );
+
+  Widget detailChoice(
+    String label,
+    String value,
+    Map<String, String> options,
+    ValueChanged<String> update,
+  ) => DropdownButtonFormField<String>(
+    key: ValueKey('$label-$value'),
+    initialValue: value,
+    isExpanded: true,
+    decoration: InputDecoration(labelText: label),
+    items: [
+      for (final entry in options.entries)
+        DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+    ],
+    onChanged: busy || !ready
+        ? null
+        : (v) {
+            if (v == null) return;
+            setState(() {
+              id = null;
+              update(v);
+            });
+            draft();
+          },
   );
 }

@@ -155,6 +155,28 @@ class AgroPlanHome extends StatefulWidget {
 }
 
 class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
+  final sidebarController = ScrollController();
+
+  void openAnalysisSection(int value) {
+    if (value < 0 || value >= ParcelSections.labels.length) return;
+    setState(() => parcelSection = value);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && sidebarController.hasClients) {
+        sidebarController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    sidebarController.dispose();
+    super.dispose();
+  }
+
   int parcelSection = 0;
   int resultsRevision = 0;
   final mapController = MapController();
@@ -1541,6 +1563,7 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
   Widget buildSidebar(FarmParcel? selected) => Container(
     color: const Color(0xFFF5F7F3),
     child: ListView(
+      controller: sidebarController,
       padding: const EdgeInsets.all(16),
       children: [
         const Text(
@@ -1656,6 +1679,7 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
             ),
           if (parcelSection <= 3 && selected.revision > 0)
             AgronomyPanel(
+              onSectionRequested: openAnalysisSection,
               key: ValueKey('agronomy-${selected.id}'),
               revision: agronomyRevision,
               section: parcelSection,

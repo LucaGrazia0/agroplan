@@ -4,14 +4,16 @@ import json
 from typing import Literal
 from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from auth import CurrentUser, require_parcel
 from storage import connect
 
 router = APIRouter(tags=['Rilievi e risultati'])
 SYMPTOMS = {'yellowing','wilting','spots','insects','uneven_growth','no_symptoms'}
+DETAIL_DEFAULTS = {'leaf_age':'unknown','distribution':'unknown','root_condition':'unknown','noticed_since':None}
 
 class Observation(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
     parcel_id: str = Field(min_length=1,max_length=128)
     observed_at: date
     symptoms: list[Literal['yellowing','wilting','spots','insects','uneven_growth','no_symptoms']] = Field(default_factory=list,max_length=6)
@@ -19,10 +21,15 @@ class Observation(BaseModel):
     affected_percent: float | None = Field(default=None,ge=0,le=100)
     plant_part: Literal['leaves','stem','roots','whole'] = 'leaves'
     notes: str = Field(default='',max_length=3000)
+    leaf_age: Literal['unknown','young','old','all'] = 'unknown'
+    distribution: Literal['unknown','scattered','patches','uniform'] = 'unknown'
+    root_condition: Literal['unknown','normal','damaged','dry'] = 'unknown'
+    noticed_since: date | None = None
 
     @model_validator(mode='after')
     def valid_report(self):
         if self.observed_at > date.today(): raise ValueError('La data non può essere futura.')
+        if self.noticed_since and self.noticed_since > self.observed_at: raise ValueError('L’inizio dei sintomi non può essere successivo al rilievo.')
         if not self.symptoms and not self.notes.strip(): raise ValueError('Indica cosa hai osservato.')
         if 'no_symptoms' in self.symptoms and len(set(self.symptoms))>1: raise ValueError('Assenza di sintomi incompatibile con altri sintomi.')
         self.symptoms=sorted(set(self.symptoms))
@@ -49,7 +56,10 @@ def save_observation(observation_id:UUID,item:Observation,user:CurrentUser):
     with connect() as db:
         db.execute('INSERT INTO agr_field_observations(id,parcel_id,observed_at,created_at,payload) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING', (key,item.parcel_id,item.observed_at.isoformat(),now,payload))
         row=db.execute('SELECT * FROM agr_field_observations WHERE id=?',(key,)).fetchone()
-        if row['parcel_id']!=item.parcel_id or row['payload']!=payload: raise HTTPException(409,'Questo rilievo è già stato salvato con dati diversi.')
+        # New optional details must not break retries of observations saved by
+        # older clients. Do not rewrite those immutable historical payloads.
+        previous = dict(DETAIL_DEFAULTS, **json.loads(row['payload']))
+        if row['parcel_id']!=item.parcel_id or previous!=json.loads(payload): raise HTTPException(409,'Questo rilievo è già stato salvato con dati diversi.')
     return dict(json.loads(row['payload']),id=key,created_at=row['created_at'])
 
 @router.get('/agronomy/results')

@@ -49,8 +49,9 @@ def synthesize(review, crop=None, today=None):
     inferred = [e for e in (review.get('integrated_assessment') or {}).get('evidence', []) if e.get('source') == 'Parola nella nota da confermare']
     measured = day(params.get('observed_at'))
     moisture, fc, wp = (number(params.get(k)) for k in ('moisture_percent', 'field_capacity_percent', 'wilting_point_percent'))
-    same_day_dry = (water.get('status') == 'available' and moisture is not None and measured is not None
-                    and 0 <= (today-measured).days <= 7 and measured == day((latest or {}).get('observed_at')) and moisture <= wp)
+    same_day_measured = (water.get('status') == 'available' and moisture is not None and measured is not None
+                         and 0 <= (today-measured).days <= 7 and measured == day((latest or {}).get('observed_at')))
+    same_day_dry = bool(same_day_measured and moisture <= wp)
     urgent = bool(signs and (latest.get('severity') == 'high' or (number(latest.get('affected_percent')) or 0) >= 30))
     if urgent:
         add('field_priority', 'La prima priorità è un sopralluogo',
@@ -67,6 +68,12 @@ def synthesize(review, crop=None, today=None):
             'Nel modello del profilo il valore è compatibile con disponibilità idrica molto ridotta. La coincidenza sostiene questa pista, senza provare che sia l’unica causa.',
             'Verifica subito misura, profondità e stato delle radici; confronta irrigazioni e distribuzione dei sintomi con un tecnico prima di decidere l’intervento.',
             ['observations', 'water'], ['fao56_8', 'csu_diagnosis'])
+    elif 'wilting' in signs and same_day_measured and moisture>=fc:
+        add('wilting_wet_profile', 'Appassimento con profilo misurato umido: controlla l’assorbimento',
+            f'Il rilievo e la misura sono del {measured}: umidità {moisture:g}% vol., capacità di campo {fc:g}% vol. '
+            'La misura non sostiene una scarsità d’acqua in quel profilo. Non esclude problemi radicali, di assorbimento o di rappresentatività della misura.',
+            'Controlla misura e profondità, radici e drenaggio; non dedurre la necessità di altra acqua dal solo appassimento.',
+            ['observations','water'], ['fao56_8','csu_diagnosis'])
     elif 'wilting' in signs and aligned:
         balance = weather['values']['balance_mm']
         add('wilting_weather', 'Appassimento: verifica prima acqua e radici',

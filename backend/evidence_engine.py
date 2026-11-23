@@ -45,7 +45,7 @@ def integrate(review,records,today=None,crop=None,windows=None,parameters=None):
         if signs:
             parts={'leaves':'foglie','stem':'fusto','roots':'radici','whole':'pianta intera'}
             evidence.append({'label':f"Parte osservata: {parts.get(latest.get('plant_part'),'non indicata')}; piante interessate: {latest.get('affected_percent') if latest.get('affected_percent') is not None else 'non indicato'}%.",'source':'Rilievo visivo','date':latest['observed_at']})
-            if latest['severity']=='high' or (latest.get('affected_percent') is not None and latest['affected_percent']>=30):
+            if explicit-{'no_symptoms'} and (latest['severity']=='high' or (latest.get('affected_percent') is not None and latest['affected_percent']>=30)):
                 review['checks'].insert(0,{'title':'Sopralluogo prioritario','evidence':'Segnalati sintomi intensi o diffusi nel rilievo visivo.','action':'Verifica estensione, andamento e condizioni delle piante con un tecnico; non attendere soltanto il prossimo dato satellitare.'})
             if 'yellowing' in signs:
                 hypotheses.append({'hypothesis':'L’ingiallimento può avere cause nutrizionali, idriche o fisiologiche.','evidence':'Sintomo riportato nel rilievo.','next_check':'Descrivi se interessa foglie giovani o vecchie; confronta radici, umidità e analisi disponibili.'})
@@ -69,4 +69,6 @@ def integrate(review,records,today=None,crop=None,windows=None,parameters=None):
     review['manual_assessment']=evaluate(review,crop,windows,parameters,today)
     from decision_engine import synthesize
     review['decision_support']=synthesize(review,crop,today)
+    from assessment_detail import enrich
+    review['decision_support']=enrich(review,records,crop,today)
     return review

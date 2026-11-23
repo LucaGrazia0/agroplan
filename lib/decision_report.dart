@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 
 class DecisionReport extends StatelessWidget {
-  const DecisionReport({super.key, required this.data});
+  const DecisionReport({
+    super.key,
+    required this.data,
+    this.onSectionRequested,
+  });
   final Map data;
+  final ValueChanged<int>? onSectionRequested;
 
   @override
   Widget build(BuildContext context) {
@@ -10,6 +15,9 @@ class DecisionReport extends StatelessWidget {
     final conclusions = data['conclusions'] as List? ?? [];
     final steps = data['next_steps'] as List? ?? [];
     final gaps = data['missing_inputs'] as List? ?? [];
+    final trend = data['observation_trend'] as Map?;
+    final candidates = data['differential'] as List? ?? [];
+    final questions = data['questions'] as List? ?? [];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -118,6 +126,121 @@ class DecisionReport extends StatelessWidget {
                 ListTile(contentPadding: EdgeInsets.zero, title: Text('$step')),
             ],
           ),
+        for (final note in data['quality_notes'] as List? ?? [])
+          Card(
+            color: Colors.orange.shade50,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text('$note'),
+            ),
+          ),
+        if (trend != null)
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: const Text('Come cambiano i rilievi'),
+            subtitle: Text('${trend['summary']}'),
+            children: [
+              for (final point in trend['points'] as List? ?? [])
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('${point['observed_at']}'),
+                  subtitle: Text(
+                    'Piante interessate: ${point['affected_percent'] ?? '—'}% · intensità ${const {'mild': 'lieve', 'moderate': 'moderata', 'high': 'elevata'}[point['severity']] ?? 'non indicata'}',
+                  ),
+                ),
+              if (trend['severity_change'] != null)
+                Text(
+                  'Intensità segnalata: ${const {'increased': 'aumentata', 'decreased': 'diminuita', 'unchanged': 'uguale'}[trend['severity_change']]}.',
+                ),
+              for (final limit in trend['limitations'] as List? ?? [])
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text('$limit', style: const TextStyle(fontSize: 12)),
+                ),
+            ],
+          ),
+        if (candidates.isNotEmpty) ...[
+          const Text(
+            'Piste da verificare',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+          ),
+          Text(
+            '${data['evidence_note']}',
+            style: const TextStyle(fontSize: 12),
+          ),
+          for (final candidate in candidates)
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: Text('${candidate['title']}'),
+              subtitle: Text(
+                (const {
+                      'consistent_inputs': 'Ci sono riscontri compatibili',
+                      'to_verify': 'Servono ulteriori verifiche',
+                      'less_supported': 'Un dato non sostiene questa pista',
+                      'conflicting_inputs':
+                          'Prima chiarisci i dati discordanti',
+                    })[candidate['status']] ??
+                    'Da verificare',
+              ),
+              children: [
+                for (final entry in {
+                  'supporting': 'Elementi a favore',
+                  'contradicting': 'Elementi che non concordano',
+                  'missing': 'Cosa manca',
+                }.entries)
+                  if ((candidate[entry.key] as List? ?? []).isNotEmpty) ...[
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        entry.value,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    for (final reason in candidate[entry.key] as List)
+                      ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text('$reason'),
+                      ),
+                  ],
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text('${candidate['next_check']}'),
+                ),
+              ],
+            ),
+        ],
+        if (questions.isNotEmpty)
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            initiallyExpanded: false,
+            title: const Text('Domande per affinare l’analisi'),
+            subtitle: Text('${questions.length} domande mirate'),
+            children: [
+              for (final q in questions)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('${q['text']}'),
+                  subtitle: Text('${q['reason']}'),
+                ),
+              if (onSectionRequested != null)
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final section in [3, 1, 4])
+                      if (questions.any((q) => q['section'] == section))
+                        TextButton.icon(
+                          onPressed: () => onSectionRequested!(section),
+                          icon: const Icon(Icons.edit_outlined),
+                          label: Text(
+                            '${const {3: 'Completa il rilievo', 1: 'Completa le misure del suolo', 4: 'Completa la coltura'}[section]}',
+                          ),
+                        ),
+                  ],
+                ),
+            ],
+          ),
+        const SizedBox(height: 20),
         ExpansionTile(
           tilePadding: EdgeInsets.zero,
           title: const Text('Input analizzati'),

@@ -5,9 +5,15 @@ import 'decision_report.dart';
 
 /// A saved report and a fresh report use the same category layout.
 class AnalysisReport extends StatelessWidget {
-  const AnalysisReport({super.key, required this.data, this.section = 0});
+  const AnalysisReport({
+    super.key,
+    required this.data,
+    this.section = 0,
+    this.onSectionRequested,
+  });
   final Map data;
   final int section; // 0 summary, 1 soil, 2 weather, 3 problems
+  final ValueChanged<int>? onSectionRequested;
 
   static const names = {
     'soil': 'Suolo',
@@ -52,7 +58,10 @@ class AnalysisReport extends StatelessWidget {
             ),
           ),
         if (section == 0 && review['decision_support'] is Map)
-          DecisionReport(data: review['decision_support']),
+          DecisionReport(
+            data: review['decision_support'],
+            onSectionRequested: onSectionRequested,
+          ),
         if (section == 0 && review['decision_support'] == null) ...[
           const Text(
             'Questo risultato contiene il riepilogo precedente. Per un nuovo ritorno, avvia l’analisi integrata della particella.',

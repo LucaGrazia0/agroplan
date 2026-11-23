@@ -99,4 +99,45 @@ void main() {
       expect(find.text('Valutazione 2'), findsOneWidget);
     },
   );
+  testWidgets(
+    'Le domande guidano al rilievo e le piste mostrano i dati contrari',
+    (tester) async {
+      var section = -1;
+      final data = decision('Verifica le piste');
+      data['questions'] = [
+        {
+          'id': 'roots',
+          'text': 'Che aspetto hanno le radici?',
+          'reason': 'Serve a distinguere le piste.',
+          'section': 3,
+        },
+      ];
+      data['differential'] = [
+        {
+          'title': 'Poca acqua nel profilo',
+          'status': 'less_supported',
+          'supporting': ['Appassimento segnalato.'],
+          'contradicting': ['Il profilo misurato è umido.'],
+          'missing': [],
+          'next_check': 'Verifica le radici.',
+        },
+      ];
+      data['evidence_note'] = 'Le piste non sono probabilità.';
+      await tester.pumpWidget(
+        page(
+          DecisionReport(data: data, onSectionRequested: (v) => section = v),
+        ),
+      );
+      await tester.ensureVisible(find.text('Poca acqua nel profilo'));
+      await tester.tap(find.text('Poca acqua nel profilo'));
+      await tester.pumpAndSettle();
+      expect(find.text('Il profilo misurato è umido.'), findsOneWidget);
+      await tester.ensureVisible(find.text('Domande per affinare l’analisi'));
+      await tester.tap(find.text('Domande per affinare l’analisi'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Completa il rilievo'));
+      await tester.tap(find.text('Completa il rilievo'));
+      expect(section, 3);
+    },
+  );
 }

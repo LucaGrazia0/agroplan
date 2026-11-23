@@ -96,4 +96,79 @@ void main() {
       'Rilievo da inviare',
     );
   });
+  testWidgets('I dettagli del rilievo vengono inviati insieme ai sintomi', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 2000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    Map<String, dynamic>? saved;
+    useHttpClientForTesting(
+      MockClient((r) async {
+        if (r.method == 'PUT') {
+          saved = jsonDecode(r.body) as Map<String, dynamic>;
+          return http.Response(
+            r.body,
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        return http.Response('[]', 200);
+      }),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: FieldObservations(parcelId: 'field-1', onChanged: () {}),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ingiallimento'));
+    await tester.tap(find.text('Dettagli per migliorare l’analisi'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find
+          .ancestor(
+            of: find.text('Foglie interessate'),
+            matching: find.byType(DropdownButtonFormField<String>),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Giovani').last);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find
+          .ancestor(
+            of: find.text('Distribuzione dei sintomi'),
+            matching: find.byType(DropdownButtonFormField<String>),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('A chiazze').last);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find
+          .ancestor(
+            of: find.text('Aspetto delle radici'),
+            matching: find.byType(DropdownButtonFormField<String>),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Scure o danneggiate').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Salva rilievo'));
+    await tester.tap(find.text('Salva rilievo'));
+    await tester.pumpAndSettle();
+    expect(saved?['leaf_age'], 'young');
+    expect(saved?['distribution'], 'patches');
+    expect(saved?['root_condition'], 'damaged');
+    expect(saved?['symptoms'], ['yellowing']);
+  });
 }

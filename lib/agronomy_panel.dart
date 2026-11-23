@@ -15,9 +15,11 @@ class AgronomyPanel extends StatefulWidget {
     this.revision = 0,
     this.onResultSaved,
     this.section = 0,
+    this.onSectionRequested,
   });
 
   final int section;
+  final ValueChanged<int>? onSectionRequested;
   final String parcelId;
   final double? latitude;
   final double? longitude;
@@ -187,7 +189,11 @@ class _AgronomyPanelState extends State<AgronomyPanel> {
               TextButton(onPressed: load, child: const Text('Riprova')),
             ],
             if (result != null)
-              AnalysisReport(data: result!, section: widget.section),
+              AnalysisReport(
+                data: result!,
+                section: widget.section,
+                onSectionRequested: widget.onSectionRequested,
+              ),
           ],
         ),
       ),
