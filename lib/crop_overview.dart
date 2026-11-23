@@ -64,21 +64,42 @@ class _CropOverviewState extends State<CropOverview> {
                             '${parcel['name']}',
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
-                          Text('${parcel['review']['summary']}'),
-                          for (final check
-                              in parcel['review']['checks'] as List)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: Text(
-                                '${check['title']}: ${check['evidence']}\n${check['action']}',
+                          if (parcel['review']['decision_support'] is Map) ...[
+                            Text(
+                              '${parcel['review']['decision_support']['headline']}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                          for (final gap
-                              in parcel['review']['missing_data'] as List)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text('• $gap'),
+                            Text(
+                              '${parcel['review']['decision_support']['summary']}',
                             ),
+                            for (final step
+                                in (parcel['review']['decision_support']['next_steps']
+                                        as List)
+                                    .take(3))
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text('• $step'),
+                              ),
+                          ] else
+                            Text('${parcel['review']['summary']}'),
+                          if (parcel['review']['decision_support'] == null) ...[
+                            for (final check
+                                in parcel['review']['checks'] as List)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  '${check['title']}: ${check['evidence']}\n${check['action']}',
+                                ),
+                              ),
+                            for (final gap
+                                in parcel['review']['missing_data'] as List)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text('• $gap'),
+                              ),
+                          ],
                         ],
                       ),
                     ),

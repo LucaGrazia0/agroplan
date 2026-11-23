@@ -58,6 +58,7 @@ def test_real_postgres_persistence_ids_conflicts_and_analysis(pg_client,parcel):
     assert client.put('/agronomy/parameters/field-1',json=params,headers=auth).status_code==200
     assert client.get('/agronomy/parameters/field-1',headers=auth).json()['root_depth_m']==.8
     assert client.get('/agronomy/overview',headers=auth).json()['parcels'][0]['review']['manual_assessment']['parameters']['root_depth_m']==.8
+    assert client.get('/agronomy/overview',headers=auth).json()['parcels'][0]['review']['decision_support']['next_steps']
     assert client.post('/auth/logout',headers=auth).status_code==204
     assert client.get('/parcels',headers=auth).status_code==401
 

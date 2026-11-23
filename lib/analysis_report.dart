@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'decision_report.dart';
+
 /// A saved report and a fresh report use the same category layout.
 class AnalysisReport extends StatelessWidget {
   const AnalysisReport({super.key, required this.data, this.section = 0});
@@ -49,7 +51,12 @@ class AnalysisReport extends StatelessWidget {
               'Questo risultato usa il formato precedente. Aggiorna l’analisi per ottenere le sezioni e i riferimenti ai manuali.',
             ),
           ),
-        if (section == 0) ...[
+        if (section == 0 && review['decision_support'] is Map)
+          DecisionReport(data: review['decision_support']),
+        if (section == 0 && review['decision_support'] == null) ...[
+          const Text(
+            'Questo risultato contiene il riepilogo precedente. Per un nuovo ritorno, avvia l’analisi integrata della particella.',
+          ),
           Text('${review['summary'] ?? 'Sintesi dei dati disponibili'}'),
           const SizedBox(height: 12),
           Text(
@@ -81,7 +88,8 @@ class AnalysisReport extends StatelessWidget {
                   ListTile(title: Text('$gap')),
               ],
             ),
-        ] else ...[
+        ],
+        if (section != 0) ...[
           for (final item in selected['findings'] as List? ?? [])
             findingCard(context, item as Map, references),
           if (section == 2) ...[

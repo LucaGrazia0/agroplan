@@ -19,8 +19,8 @@ class AgronomyPanel extends StatefulWidget {
 
   final int section;
   final String parcelId;
-  final double latitude;
-  final double longitude;
+  final double? latitude;
+  final double? longitude;
   final String baseUrl;
   final int revision;
   final VoidCallback? onResultSaved;
@@ -119,7 +119,7 @@ class _AgronomyPanelState extends State<AgronomyPanel> {
       1 => 'Analisi del suolo',
       2 => 'Analisi meteo',
       3 => 'Analisi delle problematiche',
-      _ => 'Sintesi dei risultati',
+      _ => 'Analisi integrata',
     };
     return Card(
       child: Padding(
@@ -138,14 +138,24 @@ class _AgronomyPanelState extends State<AgronomyPanel> {
                     ),
                   ),
                 ),
-                IconButton(
-                  tooltip: 'Aggiorna analisi',
-                  onPressed: loading ? null : load,
-                  icon: const Icon(Icons.refresh),
-                ),
+                if (widget.section != 0)
+                  IconButton(
+                    tooltip: 'Aggiorna analisi',
+                    onPressed: loading ? null : load,
+                    icon: const Icon(Icons.refresh),
+                  ),
               ],
             ),
-            if (widget.section == 0)
+            if (widget.section == 0) ...[
+              const Text(
+                'Il motore legge coltura, suolo, meteo, rilievi e satellite disponibili e restituisce una valutazione con le prossime verifiche.',
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: loading ? null : load,
+                icon: const Icon(Icons.auto_graph),
+                label: const Text('Analizza tutti gli input'),
+              ),
               ExpansionTile(
                 tilePadding: EdgeInsets.zero,
                 title: const Text('Opzioni di aggiornamento'),
@@ -164,6 +174,7 @@ class _AgronomyPanelState extends State<AgronomyPanel> {
                   ),
                 ],
               ),
+            ],
             if (loading) ...[
               const LinearProgressIndicator(),
               const SizedBox(height: 8),

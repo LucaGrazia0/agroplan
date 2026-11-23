@@ -1654,9 +1654,7 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
               parcelId: selected.id,
               onChanged: () => setState(() => agronomyRevision++),
             ),
-          if (parcelSection <= 3 &&
-              selected.points.isNotEmpty &&
-              selected.revision > 0)
+          if (parcelSection <= 3 && selected.revision > 0)
             AgronomyPanel(
               key: ValueKey('agronomy-${selected.id}'),
               revision: agronomyRevision,
@@ -1666,16 +1664,18 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
               },
               parcelId: selected.id,
               baseUrl: copernicusBaseUrl,
-              latitude:
-                  selected.points
-                      .map((p) => p.latitude)
-                      .reduce((a, b) => a + b) /
-                  selected.points.length,
-              longitude:
-                  selected.points
-                      .map((p) => p.longitude)
-                      .reduce((a, b) => a + b) /
-                  selected.points.length,
+              latitude: selected.points.isEmpty
+                  ? null
+                  : selected.points
+                            .map((p) => p.latitude)
+                            .reduce((a, b) => a + b) /
+                        selected.points.length,
+              longitude: selected.points.isEmpty
+                  ? null
+                  : selected.points
+                            .map((p) => p.longitude)
+                            .reduce((a, b) => a + b) /
+                        selected.points.length,
             ),
 
           if (parcelSection == 0 && selected.revision > 0)

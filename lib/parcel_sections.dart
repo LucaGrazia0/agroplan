@@ -9,7 +9,7 @@ class ParcelSections extends StatelessWidget {
   final int selected;
   final ValueChanged<int> onChanged;
   static const labels = [
-    'Sintesi',
+    'Analisi integrata',
     'Suolo',
     'Meteo',
     'Problematiche',
@@ -17,7 +17,7 @@ class ParcelSections extends StatelessWidget {
     'Mappa e satellite',
   ];
   static const icons = [
-    Icons.dashboard_outlined,
+    Icons.auto_graph,
     Icons.science_outlined,
     Icons.cloud_outlined,
     Icons.health_and_safety_outlined,

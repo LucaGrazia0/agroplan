@@ -67,4 +67,6 @@ def integrate(review,records,today=None,crop=None,windows=None,parameters=None):
     review['summary']=f"{sum(review['coverage'].values())} fonti disponibili su {len(review['coverage'])}. "+('Confronta le evidenze e completa le verifiche suggerite.' if latest else 'Manca un rilievo visivo recente delle piante.')
     from manual_engine import evaluate
     review['manual_assessment']=evaluate(review,crop,windows,parameters,today)
+    from decision_engine import synthesize
+    review['decision_support']=synthesize(review,crop,today)
     return review

@@ -3,7 +3,7 @@
 The application ships these methods; it does not silently scrape or execute
 instructions from manuals at runtime. Changes require a version and tests.
 """
-VERSION = '2026.11.20.1'
+VERSION = '2026.11.23.1'
 SOURCES = {
     'fao56_6': {
         'title': 'FAO Irrigation and Drainage Paper 56 (1998), capitolo 6',

@@ -4,7 +4,7 @@ from typing import Optional
 import math
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from storage import connect
 from auth import CurrentUser, require_parcel
@@ -16,11 +16,17 @@ router = APIRouter(prefix="/agronomy", tags=["Agronomy"])
 
 class AgronomyRequest(BaseModel):
     parcel_id: str = Field(min_length=1)
-    latitude: float = Field(ge=35, le=48)
-    longitude: float = Field(ge=6, le=19)
+    latitude: Optional[float] = Field(default=None, ge=35, le=48)
+    longitude: Optional[float] = Field(default=None, ge=6, le=19)
     season: Optional[str] = None
     history_days: int = Field(default=60, ge=30, le=180)
     include_satellite: bool = False
+
+    @model_validator(mode='after')
+    def coordinate_pair(self):
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError('Fornisci entrambe le coordinate oppure nessuna.')
+        return self
 
 
 def finite(value):
@@ -230,13 +236,15 @@ def register_agronomy_routes(app, weather_handler, weather_request_class, satell
         latitude = sum(p['lat'] for p in points)/len(points) if points else req.latitude
         longitude = sum(p['lng'] for p in points)/len(points) if points else req.longitude
         try:
+            if latitude is None or longitude is None:
+                raise HTTPException(422, 'Coordinate assenti')
             weather = await weather_handler(
                 weather_request_class(latitude=latitude, longitude=longitude, history_days=req.history_days)
             )
             result = build_indicators(weather, crop)
         except HTTPException:
             result = {'crop_context': crop, 'windows': {}, 'monitoring_alerts': [],
-                      'warnings': ['Meteo non disponibile: la sintesi usa solo i record salvati.'], 'source': 'Record aziendali'}
+                      'warnings': ['Coordinate assenti: analizzo i record salvati senza attribuire dati meteo a una posizione presunta.' if latitude is None else 'Meteo non disponibile: la sintesi usa solo i record salvati.'], 'source': 'Record aziendali'}
         from crop_analysis import saved_context, build_crop_review
         if req.include_satellite and satellite_handler and points:
             try:

@@ -156,7 +156,7 @@ class _SavedAnalysisViewState extends State<SavedAnalysisView> {
             labelText: 'Sezione del risultato salvato',
           ),
           items: const [
-            DropdownMenuItem(value: 0, child: Text('Sintesi')),
+            DropdownMenuItem(value: 0, child: Text('Analisi integrata')),
             DropdownMenuItem(value: 1, child: Text('Suolo')),
             DropdownMenuItem(value: 2, child: Text('Meteo')),
             DropdownMenuItem(value: 3, child: Text('Problematiche')),
