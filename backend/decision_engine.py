@@ -47,6 +47,10 @@ def synthesize(review, crop=None, today=None):
 
     signs = set((latest or {}).get('symptoms', [])) - {'no_symptoms'}
     inferred = [e for e in (review.get('integrated_assessment') or {}).get('evidence', []) if e.get('source') == 'Parola nella nota da confermare']
+    measured = day(params.get('observed_at'))
+    moisture, fc, wp = (number(params.get(k)) for k in ('moisture_percent', 'field_capacity_percent', 'wilting_point_percent'))
+    same_day_dry = (water.get('status') == 'available' and moisture is not None and measured is not None
+                    and 0 <= (today-measured).days <= 7 and measured == day((latest or {}).get('observed_at')) and moisture <= wp)
     urgent = bool(signs and (latest.get('severity') == 'high' or (number(latest.get('affected_percent')) or 0) >= 30))
     if urgent:
         add('field_priority', 'La prima priorità è un sopralluogo',
@@ -57,7 +61,13 @@ def synthesize(review, crop=None, today=None):
             'Nel testo riconosco: ' + ', '.join(e['label'] for e in inferred) + '. Sono indizi testuali, non osservazioni strutturate confermate.',
             'Se presenti, seleziona i sintomi nel rilievo e indica distribuzione e percentuale di piante.', ['observations'], ['csu_diagnosis'])
     aligned = 'problems.water_context' in findings
-    if 'wilting' in signs and aligned:
+    if 'wilting' in signs and same_day_dry:
+        add('wilting_soil', 'Appassimento e misura del suolo indicano una verifica idrica prioritaria',
+            f'Il rilievo e la misura sono entrambi del {measured}: umidità {moisture:g}% in volume, punto di appassimento indicato {wp:g}%. '
+            'Nel modello del profilo il valore è compatibile con disponibilità idrica molto ridotta. La coincidenza sostiene questa pista, senza provare che sia l’unica causa.',
+            'Verifica subito misura, profondità e stato delle radici; confronta irrigazioni e distribuzione dei sintomi con un tecnico prima di decidere l’intervento.',
+            ['observations', 'water'], ['fao56_8', 'csu_diagnosis'])
+    elif 'wilting' in signs and aligned:
         balance = weather['values']['balance_mm']
         add('wilting_weather', 'Appassimento: verifica prima acqua e radici',
             f"Il rilievo ricade nel periodo meteo analizzato, con P − ET₀ pari a {balance:g} mm. " +
@@ -84,9 +94,7 @@ def synthesize(review, crop=None, today=None):
         add('growth_distribution', 'Confronta le zone con sviluppo diverso',
             'La crescita irregolare richiede un confronto tra zone, fase colturale, radici e condizioni del suolo.',
             'Confronta piante sane e interessate nelle stesse condizioni; annota distribuzione, lavorazioni e irrigazioni.', ['observations', 'crop', 'soil'], ['csu_diagnosis'])
-    measured = day(params.get('observed_at'))
-    moisture, fc, wp = (number(params.get(k)) for k in ('moisture_percent', 'field_capacity_percent', 'wilting_point_percent'))
-    if water.get('status') == 'available' and moisture is not None and measured and 0 <= (today-measured).days <= 7 and (moisture <= wp or moisture > fc):
+    if not ('wilting' in signs and same_day_dry) and water.get('status') == 'available' and moisture is not None and measured and 0 <= (today-measured).days <= 7 and (moisture <= wp or moisture > fc):
         add('water_measurement', 'Verifica il valore di umidità del profilo',
             f'La misura del {measured} è {moisture:g}% in volume; capacità di campo {fc:g}%, appassimento {wp:g}%. ' +
             ('Il valore è pari o inferiore al punto di appassimento inserito.' if moisture <= wp else 'Il valore supera la capacità di campo inserita.') +

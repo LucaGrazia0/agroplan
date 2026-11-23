@@ -61,6 +61,20 @@ def test_no_symptoms_report_is_not_a_health_certificate():
     assert result['status']!='priority_check'
 
 
+def test_wilting_and_dry_root_zone_are_connected_only_for_the_same_recent_day():
+    record={'observed_at':'2026-11-20','symptoms':['wilting'],'severity':'mild','affected_percent':10,'plant_part':'leaves','notes':''}
+    params={'observed_at':'2026-11-20','field_capacity_percent':30,'wilting_point_percent':15,'root_depth_m':.8,'moisture_percent':10}
+    base=build_crop_review(None,None,[],today=TODAY)
+    result=integrate(base,[record],today=TODAY,parameters=params)['decision_support']
+    linked=next(c for c in result['conclusions'] if c['id']=='wilting_soil')
+    assert set(linked['input_ids'])=={'observations','water'}
+    assert linked['action']==result['next_steps'][0]
+    assert not any(c['id']=='wilting_unaligned' for c in result['conclusions'])
+    for change in [{'observed_at':'2026-11-19'},{'moisture_percent':20}]:
+        other=integrate(build_crop_review(None,None,[],today=TODAY),[record],today=TODAY,parameters=dict(params,**change))['decision_support']
+        assert not any(c['id']=='wilting_soil' for c in other['conclusions'])
+
+
 def test_reports_without_geometry_work_without_inventing_weather(client,headers,parcel,monkeypatch):
     import main
     auth=headers()
