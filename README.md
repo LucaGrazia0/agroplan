@@ -16,13 +16,21 @@ L’app si apre su **http://localhost:8091** direttamente, **senza nome utente o
 
 Per ripristinare l’accesso con account, riavviare il servizio usando `bash 'Avvia AgroPlan.command' --require-password`. In questa modalità il primo account si crea con un collegamento locale riservato e una password scelta dal proprietario. Il deploy Render mantiene l’autenticazione.
 
-Se il vecchio database contiene dati, viene creato un backup verificato **prima** della migrazione in `backend/backups/`. Nell’uso locale senza password i record precedenti vengono associati all’azienda locale; in modalità con account l’associazione viene scelta esplicitamente nel primo accesso. I confini delle particelle, che prima erano conservati solo nel browser, si importano con **Importa particelle precedenti**, usando lo stesso browser e l’origine del vecchio avvio. Le copie precedenti vengono conservate.
+Se il vecchio database contiene dati, viene creato un backup verificato **prima** della migrazione in `backend/backups/`. Nell’uso locale senza password i record precedenti vengono associati all’azienda locale; in modalità con account l’associazione viene scelta esplicitamente nel primo accesso. Le copie storiche conservate nel browser non vengono importate automaticamente nella nuova area di lavoro.
 
 Il precedente `backend/start_mac.sh` ora avvia lo stesso percorso completo. Per cambiare porta:
 
 ```sh
 bash 'Avvia AgroPlan.command' --port 8092
 ```
+
+## Nuovo avvio e archivi (1.6.0)
+
+Un’area vuota presenta i passaggi per creare la prima particella, senza dati dimostrativi precaricati. **Area di lavoro e archivi** permette di ripartire da zero: archivia le particelle dell’azienda e conserva i relativi cicli, analisi e osservazioni. **Ripristina** recupera l’archivio insieme alle eventuali nuove particelle. Il collegamento del dispositivo resta valido.
+
+La versione dell’area di lavoro viene verificata prima di caricare la copia locale e prima di sincronizzare. Dopo un azzeramento le vecchie copie e modifiche in attesa vengono conservate in un backup locale riservato, poi escluse dalla nuova area. Server, abbinamento e altre aziende restano indipendenti. Serve una connessione al primo avvio; dopo una verifica riuscita resta disponibile la copia offline. Le copie storiche non vengono importate automaticamente.
+
+Gli archivi sono aziendali, recuperabili e inclusi nell’esportazione del database: non costituiscono una cancellazione definitiva. Le richieste concorrenti con una versione precedente vengono rifiutate. Per il servizio Render, anche gli archivi dipendono dalla durata del database gratuito della prova.
 
 ## IPA per iPhone e iPad
 

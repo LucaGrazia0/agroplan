@@ -12,6 +12,8 @@ abstract class _ParcelSyncState extends State<AgroPlanHome> {
   final savedPayloads = <String, String>{};
   final savedRevisions = <String, int>{};
   bool syncing = false;
+  bool workspaceReady = false;
+  Future<void>? workspaceCheck;
   bool syncAgain = false;
   String? syncError;
   int agronomyRevision = 0;
@@ -24,6 +26,54 @@ abstract class _ParcelSyncState extends State<AgroPlanHome> {
 }
 
 mixin _ParcelSync on _ParcelSyncState {
+  Future<void> verifyWorkspaceGeneration() async {
+    if (workspaceCheck != null) return workspaceCheck!;
+    final pending = verifyWorkspaceOnce();
+    workspaceCheck = pending;
+    try {
+      await pending;
+    } finally {
+      if (identical(workspaceCheck, pending)) workspaceCheck = null;
+    }
+  }
+
+  Future<void> verifyWorkspaceOnce() async {
+    final response = await http
+        .get(Uri.parse('$apiBaseUrl/workspace/status'))
+        .timeout(const Duration(seconds: 75));
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Area di lavoro non verificabile. Collegati al server e riprova.',
+      );
+    }
+    final data = jsonDecode(response.body) as Map;
+    final generation = data['generation'];
+    if (generation is! int) {
+      throw const FormatException('Versione area di lavoro non valida.');
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final changed = await reconcileWorkspaceCache(
+      prefs,
+      cacheKey,
+      'field_draft_${apiBaseUrl}_${ApiSession.instance.farmId}_',
+      generation,
+    );
+    if (changed && mounted) {
+      setState(() {
+        parcels.clear();
+        pendingDeletes.clear();
+        pendingSoil.clear();
+        savedPayloads.clear();
+        savedRevisions.clear();
+        selectedId = null;
+        clearSatelliteOverlay();
+        clearWeather();
+      });
+      await writeCache();
+    }
+    if (mounted) setState(() => workspaceReady = true);
+  }
+
   String parcelPayload(FarmParcel parcel) {
     final data = parcel.toJson()
       ..remove('revision')
@@ -53,6 +103,24 @@ mixin _ParcelSync on _ParcelSyncState {
   }
 
   Future<void> restoreParcels() async {
+    var offline = false;
+    try {
+      await verifyWorkspaceGeneration();
+    } catch (_) {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      if (!prefs.containsKey('${cacheKey}_generation')) {
+        setState(
+          () => syncError = 'Collegati al server per verificare l’area di lavoro prima di caricare le particelle.',
+        );
+        return;
+      }
+      offline = true;
+      setState(() {
+        workspaceReady = true;
+        syncError = 'Modalità offline: copia locale disponibile. Collegati per verificare gli aggiornamenti dell’area di lavoro.';
+      });
+    }
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString(cacheKey);
@@ -79,7 +147,7 @@ mixin _ParcelSync on _ParcelSyncState {
         });
       }
       rememberParcels();
-      await syncParcels();
+      if (!offline) await syncParcels();
     } catch (_) {
       if (mounted) {
         setState(
@@ -132,6 +200,7 @@ mixin _ParcelSync on _ParcelSyncState {
     try {
       do {
         syncAgain = false;
+        await verifyWorkspaceGeneration();
         final response = await http
             .get(Uri.parse('$apiBaseUrl/parcels'))
             .timeout(const Duration(seconds: 20));

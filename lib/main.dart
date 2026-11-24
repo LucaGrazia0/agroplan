@@ -21,6 +21,9 @@ import 'satellite_scenes.dart';
 import 'crop_overview.dart';
 import 'field_observations.dart';
 import 'results_history.dart';
+import 'workspace_cache.dart';
+import 'workspace_panel.dart';
+import 'first_steps.dart';
 import 'parcel_sections.dart';
 import 'water_parameters.dart';
 
@@ -1523,7 +1526,7 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
                           children: [
                             if (!drawing)
                               FilledButton.icon(
-                                onPressed: startDrawing,
+                                onPressed: workspaceReady ? startDrawing : null,
                                 icon: const Icon(Icons.draw),
                                 label: const Text('Disegna particella'),
                               ),
@@ -1580,18 +1583,27 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
             child: Text(syncError!, style: const TextStyle(color: Colors.red)),
           ),
         TextButton.icon(
-          onPressed: importLegacyParcels,
-          icon: const Icon(Icons.file_download),
-          label: const Text('Importa particelle precedenti'),
+          onPressed: syncing
+              ? null
+              : () => showDialog<void>(
+                  context: context,
+                  builder: (_) => WorkspacePanel(onChanged: syncParcels),
+                ),
+          icon: const Icon(Icons.inventory_2_outlined),
+          label: const Text('Area di lavoro e archivi'),
         ),
         const SizedBox(height: 16),
         if (parcels.isEmpty)
-          const Card(
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Nessuna particella presente.\nPremi "Disegna particella" sulla mappa per aggiungere il primo campo.',
-              ),
+          Builder(
+            builder: (sidebarContext) => FirstSteps(
+              ready: workspaceReady,
+              onCreate: () {
+                final scaffold = Scaffold.maybeOf(sidebarContext);
+                if (scaffold?.isEndDrawerOpen == true) {
+                  scaffold!.closeEndDrawer();
+                }
+                startDrawing();
+              },
             ),
           ),
         for (final parcel in parcels)

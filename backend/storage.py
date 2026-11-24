@@ -106,6 +106,12 @@ def initialize():
             CREATE INDEX IF NOT EXISTS idx_results_parcel ON agr_analysis_results(parcel_id,created_at);
             CREATE TABLE IF NOT EXISTS agr_analysis_parameters (
                 parcel_id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS agr_workspace_state (
+                farm_id TEXT PRIMARY KEY, generation INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS agr_workspace_archives (
+                id TEXT PRIMARY KEY, farm_id TEXT NOT NULL, created_at TEXT NOT NULL,
+                payload TEXT NOT NULL, restored_at TEXT);
+            CREATE INDEX IF NOT EXISTS idx_workspace_archives ON agr_workspace_archives(farm_id,created_at);
             CREATE TABLE IF NOT EXISTS auth_pairings (
                 code_hash TEXT PRIMARY KEY, username TEXT NOT NULL,
                 expires_at REAL NOT NULL,

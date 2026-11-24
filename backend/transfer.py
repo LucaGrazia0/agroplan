@@ -12,7 +12,7 @@ from auth import digest, password_hash
 from postgres_storage import database_url
 from storage import connect, initialize
 
-TABLES = ('agr_parcels', 'agr_crop_cycles', 'agr_bbch_observations', 'agr_soil_analyses', 'agr_satellite_observations', 'agr_field_observations', 'agr_analysis_results', 'agr_analysis_parameters')
+TABLES = ('agr_parcels', 'agr_crop_cycles', 'agr_bbch_observations', 'agr_soil_analyses', 'agr_satellite_observations', 'agr_field_observations', 'agr_analysis_results', 'agr_analysis_parameters', 'agr_workspace_state', 'agr_workspace_archives')
 
 
 def issue_pairing(username, destination):
