@@ -26,6 +26,7 @@ import 'workspace_panel.dart';
 import 'first_steps.dart';
 import 'parcel_sections.dart';
 import 'water_parameters.dart';
+import 'keyboard_controls.dart';
 
 part 'parcel_sync.dart';
 
@@ -43,6 +44,8 @@ class AgroPlanApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
     title: 'AgroPlan',
     debugShowCheckedModeBanner: false,
+    builder: (context, child) =>
+        KeyboardControls(child: child ?? const SizedBox.shrink()),
     theme: ThemeData(
       colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF32764A)),
       useMaterial3: true,
@@ -1211,14 +1214,16 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
     );
   }
 
-  Future<void> deleteSelected() async {
-    final parcel = selectedParcel;
-    if (parcel == null) return;
+  Future<void> deleteParcel(FarmParcel parcel) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Eliminare la particella?'),
-        content: Text('Vuoi eliminare "${parcel.name}"?'),
+        content: Text(
+          parcel.revision > 0
+              ? 'Vuoi eliminare "${parcel.name}" dall’area attiva? La modifica verrà sincronizzata con il server. Dopo la sincronizzazione potrai recuperare la particella e i dati collegati da Area di lavoro e archivi.'
+              : 'Vuoi eliminare "${parcel.name}"? La particella non è ancora sincronizzata: verrà rimossa dal dispositivo e non sarà disponibile un archivio sul server.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -1234,10 +1239,13 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
     if (confirmed != true || !mounted) return;
     setState(() {
       parcels.removeWhere((p) => p.id == parcel.id);
-      selectedId = null;
-      clearSatelliteOverlay();
-      clearWeather();
-      availableScenes = [];
+      if (selectedId == parcel.id) {
+        selectedId = null;
+        clearSatelliteOverlay();
+        clearWeather();
+        availableScenes = [];
+        editingVertices = false;
+      }
     });
     await saveParcels();
   }
@@ -1252,6 +1260,7 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
       }
       selectedId = parcel.id;
     });
+    if (parcel.points.isEmpty) return;
     final center = LatLng(
       parcel.points.map((p) => p.latitude).reduce((a, b) => a + b) /
           parcel.points.length,
@@ -1333,7 +1342,7 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
       ),
       endDrawer: wide
           ? null
-          : Drawer(child: SafeArea(child: buildSidebar(selected))),
+          : KeyboardAwareDrawer(child: buildSidebar(selected)),
       body: Row(
         children: [
           if (wide) SizedBox(width: 320, child: buildSidebar(selected)),
@@ -1620,6 +1629,14 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
               isThreeLine: true,
               selected: selectedId == parcel.id,
               onTap: () => focusParcel(parcel),
+              trailing: IconButton(
+                tooltip: 'Elimina ${parcel.name}',
+                onPressed: () => deleteParcel(parcel),
+                icon: Icon(
+                  Icons.delete_outline,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
             ),
           ),
         if (selected != null) ...[
@@ -1630,6 +1647,11 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: () => deleteParcel(selected),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Elimina particella'),
+          ),
           if (selected.revision == 0)
             const Text(
               'Salvataggio della particella sul server in attesa. Premi Sincronizza se la rete è disponibile.',
@@ -1918,12 +1940,6 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
               ),
             ],
 
-            const Divider(height: 32),
-            OutlinedButton.icon(
-              onPressed: deleteSelected,
-              icon: const Icon(Icons.delete_outline),
-              label: const Text('Elimina particella'),
-            ),
             const SizedBox(height: 12),
           ],
         ],

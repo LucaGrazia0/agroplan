@@ -1,4 +1,4 @@
-package com.example.agroplan
+package it.lucagrazia.agroplan
 
 import io.flutter.embedding.android.FlutterActivity
 

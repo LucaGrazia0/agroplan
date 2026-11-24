@@ -85,6 +85,12 @@ def delete_parcel(parcel_id: str, user: CurrentUser, revision: int = Query(ge=1)
             return Response(status_code=204)
         if row['revision'] != revision:
             raise conflict(row)
+        # Keep the ordinary recovery flow available for a single deletion too.
+        from datetime import datetime, timezone
+        from uuid import uuid4
+        db.execute('INSERT INTO agr_workspace_archives(id,farm_id,created_at,payload) VALUES(?,?,?,?)',
+                   (str(uuid4()),user.farm_id,datetime.now(timezone.utc).isoformat(),
+                    json.dumps({'parcels':[dict(row)]},sort_keys=True,allow_nan=False)))
         # A tombstone prevents an offline device from recreating deleted data.
         db.execute('UPDATE agr_parcels SET deleted=1,payload=NULL,revision=revision+1 WHERE id=?', (parcel_id,))
     return Response(status_code=204)
