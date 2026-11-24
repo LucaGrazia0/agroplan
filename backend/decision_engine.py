@@ -20,6 +20,9 @@ def synthesize(review, crop=None, today=None):
     satellite = review.get('satellite') or {}
     water = findings.get('soil.available_water', {})
     weather = findings.get('weather.climatic_balance', {})
+    context = review.get('observation_weather')
+    observation_weather = findings.get('weather.observation_context')
+    weather_input = observation_weather or weather
     stress = findings.get('soil.water_stress', {})
     salinity = findings.get('soil.irrigation_salinity', {})
     infiltration = findings.get('soil.irrigation_infiltration', {})
@@ -35,8 +38,8 @@ def synthesize(review, crop=None, today=None):
          'detail': f"{crop.get('crop', 'Coltura non registrata')}; " + (f"BBCH {bbch.get('bbch')} del {bbch_day}." if valid_bbch else 'fase attuale da rilevare.')},
         {'id': 'soil', 'label': 'Referto del suolo', 'status': 'available' if soil_valid else 'missing',
          'detail': f"Campione del {soil_date}; pH {soil.get('ph') if soil.get('ph') is not None else 'assente'}." if soil_valid else 'Nessun campione con data valida.'},
-        {'id': 'weather', 'label': 'Meteo', 'status': 'available' if weather.get('status') == 'available' else 'missing',
-         'detail': weather.get('evidence', 'Finestra meteo completa non disponibile.')},
+        {'id': 'weather', 'label': 'Meteo prima del rilievo' if context else 'Meteo', 'status': weather_input.get('status', 'missing'),
+         'detail': weather_input.get('evidence', 'Contesto meteo non disponibile.')},
         {'id': 'observations', 'label': 'Rilievi sulle piante', 'status': 'available' if latest else 'stale' if visual.get('record_count') else 'missing',
          'detail': f"Rilievo del {latest['observed_at']}; {visual.get('recent_count', 0)} rilievi negli ultimi 14 giorni." if latest else 'Nessun rilievo negli ultimi 14 giorni.'},
         {'id': 'satellite', 'label': 'Satellite', 'status': 'available' if satellite.get('delta') is not None else 'missing',
@@ -112,16 +115,20 @@ def synthesize(review, crop=None, today=None):
             'Conferma misura e p effettivo; confronta radici e piante sane e interessate. Il valore non determina una dose irrigua.',
             ['observations','water'],['fao56_8','csu_diagnosis'])
     elif 'wilting' in signs and aligned:
-        balance = weather['values']['balance_mm']
+        balance = context['climatic_balance_mm']
+        from weather_history import context_description
         add('wilting_weather', 'Appassimento: verifica prima acqua e radici',
-            f"Il rilievo ricade nel periodo meteo analizzato, con P − ET₀ pari a {balance:g} mm. " +
-            ('Il saldo negativo rende utile verificare la disponibilità idrica, ma non prova uno stress della coltura.' if balance < 0 else 'Il saldo non negativo non garantisce umidità sufficiente e non esclude problemi radicali o di drenaggio.'),
+            context_description(context) + ' ' +
+            ('Pioggia ed ET₀ non sono confrontabili numericamente sui dati disponibili; temperature e piogge presenti restano un contesto parziale.' if balance is None else
+             'Il saldo negativo sui giorni disponibili rende utile verificare la disponibilità idrica, ma non prova uno stress della coltura.' if balance < 0 else
+             'Il saldo non negativo sui giorni disponibili non garantisce umidità sufficiente e non esclude problemi radicali o di drenaggio.') +
+            ' Questo contesto storico non determina cosa è accaduto nei giorni mancanti o la causa del sintomo.',
             'Misura l’umidità alla profondità radicale e controlla irrigazioni, drenaggio e stato delle radici prima di decidere un intervento.',
             ['observations', 'weather', 'water'], ['fao56_8', 'csu_diagnosis'])
     elif 'wilting' in signs:
         add('wilting_unaligned', 'Appassimento: la causa non è ancora distinguibile',
-            'Il sintomo è segnalato, ma manca un confronto meteo dello stesso periodo. Non attribuisco l’appassimento alla sola pioggia o al saldo climatico.',
-            'Controlla umidità e radici e confronta dati meteo dello stesso periodo del rilievo.', ['observations', 'weather', 'water'], ['csu_diagnosis'])
+            'Il sintomo è segnalato, ma non ci sono dati giornalieri utilizzabili nelle due settimane precedenti. La data del rilievo resta invariata.',
+            'Controlla umidità e radici; aggiorna il contesto meteo precedente al rilievo quando disponibile.', ['observations', 'weather', 'water'], ['csu_diagnosis'])
     ph = findings.get('soil.ph_class', {})
     if 'yellowing' in signs:
         explanation = 'L’ingiallimento può avere cause diverse; il solo sintomo non identifica una carenza.'
@@ -177,8 +184,6 @@ def synthesize(review, crop=None, today=None):
         if f['status'] == 'missing' and f['next_check'] not in gaps: gaps.append(f['next_check'])
     if not latest:
         gaps.insert(0, 'Registra cosa osservi sulle piante, anche se non noti sintomi: serve per un ritorno sullo stato del campo.')
-    if 'problems.time_alignment' in findings:
-        gaps.append(findings['problems.time_alignment']['evidence'] + ' Servono date confrontabili per collegare sintomi e meteo.')
     sufficient = any(i['status'] == 'available' for i in inputs)
     water_check = bool((measured is not None and 0 <= (today-measured).days <= 7 and stress.get('values',{}).get('threshold_exceeded')) or any(f.get('status')=='attention' for f in (salinity,infiltration)))
     status = 'priority_check' if urgent else 'needs_verification' if signs or inferred or water_check else 'incomplete' if gaps else 'monitoring'

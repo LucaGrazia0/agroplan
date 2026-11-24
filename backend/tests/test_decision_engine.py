@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 import json
 from uuid import uuid4
 from crop_analysis import build_crop_review
@@ -11,11 +11,14 @@ WINDOWS = {'7': {'start_date':'2026-11-10','end_date':'2026-11-16','data_complet
 def analyze(symptoms=None, observed_at='2026-11-16', severity='mild', percent=10, notes='', windows=None):
     record={'observed_at':observed_at,'symptoms':symptoms or [],'severity':severity,'affected_percent':percent,'plant_part':'leaves','notes':notes}
     base=build_crop_review(None,None,[],windows=windows or {},today=TODAY)
-    return integrate(base,[record],today=TODAY,windows=windows or {})['decision_support']
+    seven=(windows or {}).get('7')
+    history=[{'date':(date.fromisoformat(seven['start_date'])+timedelta(days=i)).isoformat(),
+              'precipitation_sum':12/7, 'et0_fao_evapotranspiration':3} for i in range(7)] if seven else []
+    return integrate(base,[record],today=TODAY,windows=windows or {},weather_history=history)['decision_support']
 
 
 def test_return_crosses_wilting_with_matching_weather_and_proposes_checks():
-    result=analyze(['wilting'], windows=WINDOWS)
+    result=analyze(['wilting'], observed_at='2026-11-17', windows=WINDOWS)
     finding=next(c for c in result['conclusions'] if c['id']=='wilting_weather')
     assert '-9 mm' in finding['explanation']
     assert {'observations','weather','water'}==set(finding['input_ids'])
@@ -40,8 +43,8 @@ def test_old_or_negated_observations_and_disjoint_dates_do_not_create_causality(
     negative=analyze([],notes='Non vedo appassimento',windows=WINDOWS)
     assert not any(c['id'].startswith('wilting') or c['id']=='confirm_notes' for c in negative['conclusions'])
     disjoint=analyze(['wilting'],observed_at='2026-11-20',windows=WINDOWS)
-    assert any(c['id']=='wilting_unaligned' for c in disjoint['conclusions'])
-    assert not any(c['id']=='wilting_weather' for c in disjoint['conclusions'])
+    assert any(c['id']=='wilting_weather' for c in disjoint['conclusions'])
+    assert '7/14' in next(i for i in disjoint['inputs'] if i['id']=='weather')['detail']
 
 
 def test_missing_inputs_get_a_useful_response_without_an_all_clear():

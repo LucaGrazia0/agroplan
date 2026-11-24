@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'decision_report.dart';
+import 'observation_weather_card.dart';
 
 /// A saved report and a fresh report use the same category layout.
 class AnalysisReport extends StatelessWidget {
@@ -50,6 +51,8 @@ class AnalysisReport extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (section != 1 && review['observation_weather'] is Map)
+          ObservationWeatherCard(data: review['observation_weather']),
         if (manual == null)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 12),
@@ -100,7 +103,8 @@ class AnalysisReport extends StatelessWidget {
         ],
         if (section != 0) ...[
           for (final item in selected['findings'] as List? ?? [])
-            findingCard(context, item as Map, references),
+            if (item['rule_id'] != 'weather.observation_context')
+              findingCard(context, item as Map, references),
           if (section == 2) ...[
             Text(
               'Fonte meteo: ${data['source'] ?? '—'} · storico fino al ${data['historical_end'] ?? '—'}',

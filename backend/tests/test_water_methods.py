@@ -105,7 +105,7 @@ def test_repeat_positive_keyword_and_negated_note_and_disjoint_weather():
     windows={'7':dict(start_date='2026-11-10',end_date='2026-11-16',data_complete=True,rain_mm=10,et0_mm=30,climatic_balance_mm=-20)}
     result=integrate(build_crop_review(None,None,[],windows=windows,today=TODAY),
                      [dict(observed_at='2026-11-24',symptoms=['wilting'],severity='mild',plant_part='leaves',notes='')],windows=windows,today=TODAY)
-    assert all('-20' not in h['evidence'] for h in result['integrated_assessment']['hypotheses'])
+    assert all('-20 mm' not in h['evidence'] for h in result['integrated_assessment']['hypotheses'])
 
 
 def test_parameters_new_fields_validated_private_and_old_payloads_still_work(client,headers,parcel):

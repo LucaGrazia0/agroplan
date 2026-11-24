@@ -61,7 +61,7 @@ def test_incoherent_texture_future_referto_and_symptoms_from_different_dates():
     record={'observed_at':'2026-11-20','symptoms':['wilting'],'severity':'mild','plant_part':'leaves','notes':''}
     result=integrate(review,[record],today=TODAY,windows=WINDOWS)['manual_assessment']
     assert rule(result,'soil','soil.texture_quality')['status']=='attention'
-    assert rule(result,'problems','problems.time_alignment')['status']=='partial'
+    assert rule(result,'problems','problems.weather_missing')['status']=='missing'
     assert not any(r['rule_id']=='problems.water_context' for r in result['domains']['problems']['findings'])
     review['soil_context']['sample_date']='2026-11-21'
     assert rule(evaluate(review,today=TODAY),'soil','soil.ph_class')['status']=='missing'

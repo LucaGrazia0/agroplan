@@ -673,11 +673,11 @@ async def _open_meteo_weather(req, today):
         archive.raise_for_status()
         rows = _weather_rows(archive.json().get("daily", {}))
         normalized = daily_window(rows, req.history_days, end_date)
-        if len(normalized) != req.history_days or any(
-            not isinstance(row.get(key), (int, float)) or isinstance(row.get(key), bool) or not math.isfinite(row[key]) for row in normalized for key in
+        if not any(
+            isinstance(row.get(key), (int, float)) and not isinstance(row.get(key), bool) and math.isfinite(row[key]) for row in normalized for key in
             ("temperature_2m_max", "temperature_2m_min", "precipitation_sum", "et0_fao_evapotranspiration")
         ):
-            raise ValueError("Storico Open-Meteo incompleto")
+            raise ValueError("Storico Open-Meteo privo di dati utilizzabili")
         result = _weather_result(req, end_date, normalized, "Open-Meteo",
             note="Dati modellati su griglia; lo storico termina alla data historical_end. ET0: Open-Meteo.")
         # MET Norway is tried later even if this optional forecast fails.
@@ -730,8 +730,8 @@ async def parcel_weather(req: WeatherRequest):
         if cached and time.monotonic() - cached["time"] < WEATHER_CACHE_SECONDS:
             return cached["data"]
 
-        # Prefer a complete Open-Meteo history (including ET0). Forecast
-        # availability must not determine whether a valid history is usable.
+        # Keep usable archive days even with gaps. Each analysis checks its own
+        # coverage; missing forecasts must not discard historical observations.
         try:
             result = await _open_meteo_weather(req, today)
         except (httpx.HTTPError, ValueError, KeyError, TypeError):

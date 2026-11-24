@@ -185,8 +185,8 @@ def build_indicators(weather, crop):
 
         if observation_date > end:
             warnings.append(
-                "L'ultima osservazione BBCH è successiva alla fine "
-                "dello storico meteorologico."
+                "Lo storico meteo non copre ancora la data dell’ultimo BBCH; "
+                "la data reale del rilievo viene mantenuta."
             )
 
     for days, result in windows.items():
@@ -235,6 +235,7 @@ def register_agronomy_routes(app, weather_handler, weather_request_class, satell
         points = payload.get('points', [])
         latitude = sum(p['lat'] for p in points)/len(points) if points else req.latitude
         longitude = sum(p['lng'] for p in points)/len(points) if points else req.longitude
+        history = []
         try:
             if latitude is None or longitude is None:
                 raise HTTPException(422, 'Coordinate assenti')
@@ -242,6 +243,7 @@ def register_agronomy_routes(app, weather_handler, weather_request_class, satell
                 weather_request_class(latitude=latitude, longitude=longitude, history_days=req.history_days)
             )
             result = build_indicators(weather, crop)
+            history = weather['history']
         except HTTPException:
             result = {'crop_context': crop, 'windows': {}, 'monitoring_alerts': [],
                       'warnings': ['Coordinate assenti: analizzo i record salvati senza attribuire dati meteo a una posizione presunta.' if latitude is None else 'Meteo non disponibile: la sintesi usa solo i record salvati.'], 'source': 'Record aziendali'}
@@ -256,7 +258,7 @@ def register_agronomy_routes(app, weather_handler, weather_request_class, satell
         from field_records import observations, save_result
         from evidence_engine import integrate
         from analysis_parameters import parameters
-        result['crop_review'] = integrate(result['crop_review'], observations(req.parcel_id),crop=crop,windows=result['windows'],parameters=parameters(req.parcel_id))
+        result['crop_review'] = integrate(result['crop_review'], observations(req.parcel_id),crop=crop,windows=result['windows'],parameters=parameters(req.parcel_id),weather_history=history)
         response = {
             "parcel_id": req.parcel_id,
             "latitude": latitude,

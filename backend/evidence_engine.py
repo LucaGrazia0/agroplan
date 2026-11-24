@@ -25,11 +25,14 @@ def note_signs(text):
     return candidates
 
 
-def integrate(review,records,today=None,crop=None,windows=None,parameters=None):
+def integrate(review,records,today=None,crop=None,windows=None,parameters=None,weather_history=None):
     today=today or date.today()
     recent=sorted([r for r in records if 0 <= (today-date.fromisoformat(r['observed_at'])).days <= 14], key=lambda r:(r['observed_at'],r.get('created_at','')),reverse=True)
     evidence=[]; hypotheses=[]; questions=[]
     latest=recent[0] if recent else None
+    if latest:
+        from weather_history import observation_context
+        review['observation_weather'] = observation_context(weather_history or [], date.fromisoformat(latest['observed_at']))
     if latest:
         explicit=set(latest['symptoms'])
         inferred=note_signs(latest.get('notes',''))
@@ -49,12 +52,8 @@ def integrate(review,records,today=None,crop=None,windows=None,parameters=None):
             if 'yellowing' in signs:
                 hypotheses.append({'hypothesis':'L’ingiallimento può avere cause nutrizionali, idriche o fisiologiche.','evidence':'Sintomo riportato nel rilievo.','next_check':'Descrivi se interessa foglie giovani o vecchie; confronta radici, umidità e analisi disponibili.'})
             if 'wilting' in signs:
-                from manual_engine import day
-                window=(windows or {}).get('7') or {}
-                start,end,observed=(day(v) for v in (window.get('start_date'),window.get('end_date'),latest['observed_at']))
-                aligned=window.get('data_complete') is True and start and end and observed and start <= observed <= end <= today and (end-start).days==6
-                balance=review.get('climatic_balance_7d') if aligned else None
-                hypotheses.append({'hypothesis':'L’appassimento richiede un controllo dell’apparato radicale e della disponibilità idrica.','evidence':f'Rilievo visivo; bilancio P − ET₀: {balance} mm.' if balance is not None else 'Rilievo visivo; bilancio climatico non disponibile.','next_check':'Controlla umidità a profondità radicale e irrigazioni: il sintomo non prova da solo una carenza d’acqua.'})
+                from weather_history import context_description
+                hypotheses.append({'hypothesis':'L’appassimento richiede un controllo dell’apparato radicale e della disponibilità idrica.','evidence':context_description(review['observation_weather']),'next_check':'Controlla umidità a profondità radicale e irrigazioni: il sintomo non prova da solo una carenza d’acqua.'})
             if signs & {'spots','insects'}:
                 hypotheses.append({'hypothesis':'Macchie o insetti richiedono identificazione in campo.','evidence':'Segnalazione dell’operatore, non identificazione automatica.','next_check':'Descrivi forma, posizione, evoluzione e presenza di organismi; consulta il tecnico o il bollettino locale.'})
             if review['satellite']['delta'] is not None:

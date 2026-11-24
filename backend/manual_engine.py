@@ -124,20 +124,32 @@ def evaluate(review, crop=None, windows=None, parameters=None, today=None):
     latest = (review.get('visual_context') or {}).get('latest')
     signs = set((latest or {}).get('symptoms', [])) - {'no_symptoms'}
     observed = day((latest or {}).get('observed_at'))
+    context = review.get('observation_weather')
+    if context:
+        from weather_history import context_description
+        weather_rows.insert(0, finding('weather.observation_context', 'Meteo prima del rilievo',
+                                      'available' if context['data_complete'] else 'partial' if context['available_days'] else 'missing',
+                                      context_description(context),
+                                      'Uso i giorni effettivamente disponibili nelle due settimane precedenti. I valori parziali non rappresentano il totale di 14 giorni e non descrivono lo stato idrico attuale.',
+                                      'Consulta la copertura per variabile; aggiorna il meteo quando arrivano nuovi dati, mantenendo la data reale del rilievo.',
+                                      ['fao56_6', 'fao56_8'], values=context,
+                                      limitations=['Intervallo di 14 giorni scelto dall’app; non è una soglia diagnostica.',
+                                                   'Le date duplicate, mancanti e i valori non validi non sono interpolati né sostituiti con zero.',
+                                                   'Il confronto P − ET₀ usa soltanto gli stessi giorni con entrambi i dati.']))
     for index, hypothesis in enumerate(assessment.get('hypotheses', [])):
         problem_rows.append(finding(f'problems.differential.{index}', 'Cause da distinguere in campo', 'partial',
                                     hypothesis['evidence'], hypothesis['hypothesis'], hypothesis['next_check'], ['csu_diagnosis'],
                                     limitations=['Il metodo è generale: nessuna identificazione di patogeno o soglia di trattamento è implementata.']))
-    if signs and weather_valid and observed and start <= observed <= end:
+    if signs and context and context['available_days']:
         problem_rows.append(finding('problems.water_context', 'Confronto tra sintomi e meteo', 'partial',
-                                    f'Rilievo del {observed} nel periodo meteorologico {start}–{end}; P − ET₀ {rain-et0:.1f} mm.',
-                                    'I dati sono temporalmente confrontabili, ma non dimostrano una causa comune.',
+                                    context_description(context),
+                                    'È il contesto precedente al rilievo, anche con dati recenti ancora mancanti. Non prova una causa comune né la situazione nel giorno del rilievo.',
                                     'Verifica umidità e radici: appassimento e ingiallimento possono avere più cause.', ['fao56_8', 'csu_diagnosis']))
-    elif signs and weather_valid:
-        problem_rows.append(finding('problems.time_alignment', 'Date da riallineare', 'partial',
-                                    f'Rilievo del {observed}; meteo dal {start} al {end}.',
-                                    'Il rilievo è fuori dalla finestra meteo: non attribuisco il sintomo al bilancio di questi giorni.',
-                                    'Attendi dati meteorologici dello stesso periodo o aggiungi un rilievo datato correttamente.', ['csu_diagnosis']))
+    elif signs:
+        problem_rows.append(finding('problems.weather_missing', 'Contesto meteo non disponibile', 'missing',
+                                    f'Rilievo del {observed}; nessun dato giornaliero utilizzabile nelle due settimane precedenti.',
+                                    'Non attribuisco i sintomi a un periodo meteorologico diverso. La data del rilievo resta invariata.',
+                                    'Aggiorna lo storico meteo; nel frattempo verifica piante, radici e umidità in campo.', ['csu_diagnosis']))
     if not problem_rows:
         problem_rows.append(finding('problems.observation_gate', 'Osservazione delle piante', 'partial' if latest else 'missing',
                                     'Ultimo rilievo recente senza sintomi riconosciuti.' if latest else 'Nessun rilievo visivo degli ultimi 14 giorni.',

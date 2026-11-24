@@ -3,7 +3,7 @@
 The application ships these methods; it does not silently scrape or execute
 instructions from manuals at runtime. Changes require a version and tests.
 """
-VERSION = '2026.11.24.2'
+VERSION = '2026.11.24.3'
 SOURCES = {
     'bbch_2001': {
         'title': 'U. Meier (ed.), BBCH Monograph, 2a edizione (2001), copia MASAF',
