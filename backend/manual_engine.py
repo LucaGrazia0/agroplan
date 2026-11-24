@@ -78,12 +78,16 @@ def evaluate(review, crop=None, windows=None, parameters=None, today=None):
                                  'Verifica che le misure rappresentino lo stesso profilo e la profondità radicale attuale.', ['fao56_8'], values=values,
                                  equation='TAW = 1000 × (θFC − θWP) × Zr; θ in m³/m³, Zr in m',
                                  limitations=['Modello uniforme nella zona radicale; non include strati, salinità, falda o bilancio giornaliero.',
-                                              'La soglia RAW, il coefficiente Ks e la dose irrigua non sono calcolati.']))
+                                              'La dose irrigua non è calcolata; RAW e Ks richiedono un p effettivo verificato e sono riportati separatamente.']))
     else:
         soil_rows.append(finding('soil.available_water', 'Riserva idrica nella zona radicale', 'missing',
                                  'Servono capacità di campo, punto di appassimento e profondità radicale misurati.',
                                  'TAW non calcolata; nessun valore viene stimato dalla sola tessitura.',
                                  'Completa i parametri idrici nella sezione Suolo se disponi delle misure.', ['fao56_8']))
+
+    from water_methods import measured_water, irrigation_quality
+    soil_rows.append(measured_water(params, today))
+    soil_rows.extend(irrigation_quality(params, today))
 
     seven = windows.get('7') or {}
     start, end = day(seven.get('start_date')), day(seven.get('end_date'))
@@ -147,5 +151,5 @@ def evaluate(review, crop=None, windows=None, parameters=None, today=None):
     source_ids = [s for d in domains.values() for f in d['findings'] for s in f['source_ids']]
     return {'engine_version': VERSION, 'domains': domains, 'references': references(source_ids),
             'method': 'Metodi numerici e regole documentati, con prerequisiti e provenienza per ogni risultato.',
-            'scope': 'pH descrittivo, qualità del referto, TAW, P − ET₀, ETc standard e indagine dei sintomi. Tarature nutritive, modelli patogeno-specifici e dosi non implementati.',
+            'scope': 'pH descrittivo, qualità del referto, TAW, RAW/Ks alla misura, confronto ECw–SAR dell’acqua irrigua, P − ET₀, ETc standard e indagine dei sintomi. Tarature nutritive, modelli patogeno-specifici e dosi non implementati.',
             'parameters': params}

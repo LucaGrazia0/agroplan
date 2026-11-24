@@ -64,6 +64,7 @@ def enrich(review, records, crop=None, today=None):
     signs=set(latest.get('symptoms',[]))-{'no_symptoms'}
     findings={f['rule_id']:f for d in manual['domains'].values() for f in d['findings']}
     params=manual.get('parameters') or {}
+    stress=(findings.get('soil.water_stress') or {}).get('values',{})
     fc,wp,theta=(number(params.get(k)) for k in ('field_capacity_percent','wilting_point_percent','moisture_percent'))
     measured=day(params.get('observed_at'))
     aligned=(findings.get('soil.available_water',{}).get('status')=='available' and theta is not None and measured is not None
@@ -84,13 +85,20 @@ def enrich(review, records, crop=None, today=None):
             support.append(f'Misura dello stesso giorno: umidità {theta:g}% vol., appassimento indicato {wp:g}% vol.')
         elif aligned and theta>=fc:
             against.append(f'La misura del profilo ({theta:g}% vol.) è almeno pari alla capacità di campo ({fc:g}% vol.): non sostiene una scarsità d’acqua in quel profilo.')
+        elif aligned and stress.get('ks') is not None:
+            if stress['threshold_exceeded']:
+                support.append(f'Nel modello alla stessa data Dr {stress["depletion_mm"]:g} mm supera RAW {stress["raw_mm"]:g} mm; Ks {stress["ks"]:g}, con p effettivo fornito dall’operatore.')
+            else:
+                against.append('Alla stessa data Dr non supera RAW: il modello non indica limitazione idrica della traspirazione; non esclude salinità o problemi radicali.')
         elif aligned:
-            missing.append('L’umidità è tra punto di appassimento e capacità di campo: senza RAW/Ks non classifico lo stress idrico.')
+            missing.append('L’umidità è tra punto di appassimento e capacità di campo: senza p effettivo verificato non classifico lo stress idrico.')
+            question('verified_p','Disponi di una frazione p effettiva verificata per coltura e condizioni alla data della misura?',
+                     'Permette il confronto tra esaurimento e RAW; non viene scelta automaticamente dal nome della coltura.',1,'depletion_fraction')
         else:
             missing.append('Manca un’umidità valida del profilo misurata nello stesso giorno del rilievo.')
             question('water_same_day','Puoi misurare l’umidità alla profondità radicale nello stesso giorno del rilievo?', 'Serve a distinguere scarsità d’acqua nel suolo da problemi di assorbimento.',1,'moisture_percent')
         candidate('dry_profile','Poca acqua nel profilo radicale misurato',support,against,missing,
-                  'Verifica misura, unità, profondità e rappresentatività del profilo. Un problema di assorbimento può avere altre cause.', ['fao56_8','csu_diagnosis'],strong=bool(aligned and theta<=wp))
+                  'Verifica misura, unità, profondità e rappresentatività del profilo. Un problema di assorbimento può avere altre cause.', ['fao56_8','csu_diagnosis'],strong=bool(aligned and (theta<=wp or stress.get('threshold_exceeded'))))
         root=latest.get('root_condition','unknown')
         root_support=['L’appassimento richiede anche un controllo dell’assorbimento e delle radici.']
         if root in {'damaged','dry'}: root_support.append('L’operatore segnala radici ' + ('scure o danneggiate.' if root=='damaged' else 'secche.'))
@@ -112,6 +120,14 @@ def enrich(review, records, crop=None, today=None):
                   ['Organismo, lesione e relazione con il danno non sono identificati.'],
                   'Descrivi forma e posizione delle lesioni, evoluzione e organismi osservati; richiedi identificazione quando necessaria.', ['csu_diagnosis'])
     if signs:
+        water_findings=[findings.get(k,{}) for k in ('soil.irrigation_salinity','soil.irrigation_infiltration')]
+        if any(f.get('status') in {'attention','partial'} for f in water_findings):
+            candidate('irrigation_water_context','Qualità dell’acqua irrigua da contestualizzare',
+                      [f['evidence']+' '+f['interpretation'] for f in water_findings if f.get('status') in {'attention','partial'}],[],
+                      ['Non è confermato se e quando questa fonte sia stata usata; mancano esposizione della coltura, salinità del suolo e verifica locale.'],
+                      'Verifica fonte e date delle irrigazioni prima di collegare il referto ai sintomi. La tabella FAO è orientativa.', ['fao29_water'])
+            question('water_source_used','Questa acqua è stata usata nella particella? In quali date?',
+                     'Il referto dell’acqua, da solo, non dimostra esposizione delle piante o causa dei sintomi.')
         if latest.get('distribution','unknown')=='unknown':question('distribution','I sintomi sono isolati, a chiazze o uniformi?','Aiuta a confrontare zone e rilievi successivi.',field='distribution')
         if not latest.get('noticed_since'):question('onset','Da quando noti questi sintomi?','Serve per confrontare l’esordio con condizioni ambientali e attività nel campo.',field='noticed_since')
         if latest.get('affected_percent') is None:question('extent','Quale percentuale di piante è interessata?','Permette un confronto descrittivo con i rilievi successivi.',field='affected_percent')

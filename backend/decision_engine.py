@@ -20,6 +20,9 @@ def synthesize(review, crop=None, today=None):
     satellite = review.get('satellite') or {}
     water = findings.get('soil.available_water', {})
     weather = findings.get('weather.climatic_balance', {})
+    stress = findings.get('soil.water_stress', {})
+    salinity = findings.get('soil.irrigation_salinity', {})
+    infiltration = findings.get('soil.irrigation_infiltration', {})
     soil_date = day(soil.get('sample_date'))
     soil_valid = soil_date is not None and soil_date <= today
     bbch = crop.get('latest_bbch') or {}
@@ -39,6 +42,10 @@ def synthesize(review, crop=None, today=None):
         {'id': 'water', 'label': 'Misure idriche', 'status': 'available' if water.get('status') == 'available' else 'missing',
          'detail': water.get('evidence', 'Misure del profilo radicale non disponibili.')},
     ]
+    if salinity or infiltration:
+        inputs.append({'id':'irrigation_water','label':'Acqua irrigua',
+                       'status':'available' if salinity.get('values') else 'missing',
+                       'detail':salinity.get('evidence', 'Campione dell’acqua da completare.')})
     conclusions, gaps = [], []
 
     def add(key, title, explanation, action, input_ids, sources=(), priority='check'):
@@ -61,6 +68,18 @@ def synthesize(review, crop=None, today=None):
         add('confirm_notes', 'Conferma i segnali descritti nelle note',
             'Nel testo riconosco: ' + ', '.join(e['label'] for e in inferred) + '. Sono indizi testuali, non osservazioni strutturate confermate.',
             'Se presenti, seleziona i sintomi nel rilievo e indica distribuzione e percentuale di piante.', ['observations'], ['csu_diagnosis'])
+    if stress.get('values', {}).get('ks') is not None:
+        values=stress['values']
+        fresh=measured is not None and 0 <= (today-measured).days <= 7
+        add('measured_water_model', 'Riserva facilmente utilizzabile: confronto alla data della misura',
+            stress['evidence'] + ' ' + stress['interpretation'] +
+            (' I 7 giorni sono un criterio applicativo di aggiornamento.' if fresh else ' La misura è storica: non descrive lo stato attuale, va aggiornata.'),
+            stress['next_check'], ['water'], ['fao56_8'], 'check' if fresh and values['threshold_exceeded'] else 'monitor')
+    for f in (salinity,infiltration):
+        if f.get('status') in {'attention','partial'}:
+            add(f['rule_id'],f['title'],f['evidence']+' '+f['interpretation']+
+                ' Linee guida orientative, soprattutto per climi aridi/semiaridi: verificare applicabilità locale.',
+                f['next_check'],['irrigation_water'],['fao29_water'])
     aligned = 'problems.water_context' in findings
     if 'wilting' in signs and same_day_dry:
         add('wilting_soil', 'Appassimento e misura del suolo indicano una verifica idrica prioritaria',
@@ -74,6 +93,14 @@ def synthesize(review, crop=None, today=None):
             'La misura non sostiene una scarsità d’acqua in quel profilo. Non esclude problemi radicali, di assorbimento o di rappresentatività della misura.',
             'Controlla misura e profondità, radici e drenaggio; non dedurre la necessità di altra acqua dal solo appassimento.',
             ['observations','water'], ['fao56_8','csu_diagnosis'])
+    elif 'wilting' in signs and same_day_measured and stress.get('values',{}).get('ks') is not None:
+        values=stress['values']
+        add('wilting_raw', 'Appassimento: confronto con la riserva facilmente utilizzabile',
+            f'Rilievo e misura del profilo sono del {measured}. Dr {values["depletion_mm"]:g} mm, RAW {values["raw_mm"]:g} mm, Ks {values["ks"]:g}, con p effettivo fornito dall’operatore. ' +
+            ('Nel modello Dr supera RAW e sostiene una possibile limitazione idrica della traspirazione. Non prova che questa sia l’unica causa.' if values['threshold_exceeded'] else
+             'Dr non supera RAW: il modello non sostiene una limitazione idrica della traspirazione in quel profilo. Non esclude salinità o problemi di assorbimento.'),
+            'Conferma misura e p effettivo; confronta radici e piante sane e interessate. Il valore non determina una dose irrigua.',
+            ['observations','water'],['fao56_8','csu_diagnosis'])
     elif 'wilting' in signs and aligned:
         balance = weather['values']['balance_mm']
         add('wilting_weather', 'Appassimento: verifica prima acqua e radici',
@@ -138,10 +165,12 @@ def synthesize(review, crop=None, today=None):
     if 'problems.time_alignment' in findings:
         gaps.append(findings['problems.time_alignment']['evidence'] + ' Servono date confrontabili per collegare sintomi e meteo.')
     sufficient = any(i['status'] == 'available' for i in inputs)
-    status = 'priority_check' if urgent else 'needs_verification' if signs or inferred else 'incomplete' if gaps else 'monitoring'
+    water_check = bool((measured is not None and 0 <= (today-measured).days <= 7 and stress.get('values',{}).get('threshold_exceeded')) or any(f.get('status')=='attention' for f in (salinity,infiltration)))
+    status = 'priority_check' if urgent else 'needs_verification' if signs or inferred or water_check else 'incomplete' if gaps else 'monitoring'
     headline = ('Sopralluogo prioritario per i sintomi segnalati' if urgent else
                 'Ci sono segnali da verificare incrociando i dati' if signs else
                 'Conferma i sintomi descritti nel testo' if inferred else
+                'Verifica le misure dell’acqua e del profilo radicale' if water_check else
                 'Quadro disponibile: continua il monitoraggio' if not gaps else
                 'Valutazione parziale: completa il quadro del campo' if sufficient else
                 'Servono input per iniziare la valutazione')

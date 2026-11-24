@@ -16,6 +16,10 @@ class WaterParameters(BaseModel):
     wilting_point_percent: float | None = Field(None, ge=0, le=100)
     root_depth_m: float | None = Field(None, gt=0, le=5)
     moisture_percent: float | None = Field(None, ge=0, le=100)
+    depletion_fraction: float | None = Field(None, gt=0, lt=1)
+    water_sample_date: date | None = None
+    water_ec_ds_m: float | None = Field(None, ge=0)
+    water_sar: float | None = Field(None, ge=0)
     kc: float | None = Field(None, gt=0, le=2.5)
     kc_from: date | None = None
     kc_to: date | None = None
@@ -24,6 +28,10 @@ class WaterParameters(BaseModel):
     def coherent(self):
         if self.observed_at > date.today():
             raise ValueError('La misura non può avere una data futura.')
+        if self.water_sample_date and self.water_sample_date > date.today():
+            raise ValueError('Il campione di acqua non può avere una data futura.')
+        if (self.water_ec_ds_m is not None or self.water_sar is not None) and not self.water_sample_date:
+            raise ValueError('Indica la data del campione di acqua irrigua.')
         if self.field_capacity_percent is not None and self.wilting_point_percent is not None:
             if self.wilting_point_percent >= self.field_capacity_percent:
                 raise ValueError('Il punto di appassimento deve essere inferiore alla capacità di campo.')

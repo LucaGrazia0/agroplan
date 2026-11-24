@@ -16,13 +16,12 @@ def note_signs(text):
     clauses=re.split(r'[.;,\n]|\b(?:ma|però|tuttavia)\b',text,flags=re.I)
     for key,pattern in TERMS.items():
         for clause in clauses:
-            match=re.search(pattern,clause,re.I)
-            if not match: continue
-            before=' '.join(clause[:match.start()].split()[-5:])
-            after=clause[match.end():]
-            if re.search(r'\b(no|non|senza|nessun[oa]?|assenza)\b',before,re.I): continue
-            if re.search(r'^\w*\s+(assent\w*|non\s+present\w*)\b',after,re.I): continue
-            candidates.add(key)
+            for match in re.finditer(pattern,clause,re.I):
+                before=' '.join(clause[:match.start()].split()[-5:])
+                after=clause[match.end():]
+                if re.search(r'\b(no|non|senza|nessun[oa]?|assenza)\b',before,re.I): continue
+                if re.search(r'^\w*\s+(assent\w*|non\s+present\w*)\b',after,re.I): continue
+                candidates.add(key)
     return candidates
 
 
@@ -50,7 +49,11 @@ def integrate(review,records,today=None,crop=None,windows=None,parameters=None):
             if 'yellowing' in signs:
                 hypotheses.append({'hypothesis':'L’ingiallimento può avere cause nutrizionali, idriche o fisiologiche.','evidence':'Sintomo riportato nel rilievo.','next_check':'Descrivi se interessa foglie giovani o vecchie; confronta radici, umidità e analisi disponibili.'})
             if 'wilting' in signs:
-                balance=review.get('climatic_balance_7d')
+                from manual_engine import day
+                window=(windows or {}).get('7') or {}
+                start,end,observed=(day(v) for v in (window.get('start_date'),window.get('end_date'),latest['observed_at']))
+                aligned=window.get('data_complete') is True and start and end and observed and start <= observed <= end <= today and (end-start).days==6
+                balance=review.get('climatic_balance_7d') if aligned else None
                 hypotheses.append({'hypothesis':'L’appassimento richiede un controllo dell’apparato radicale e della disponibilità idrica.','evidence':f'Rilievo visivo; bilancio P − ET₀: {balance} mm.' if balance is not None else 'Rilievo visivo; bilancio climatico non disponibile.','next_check':'Controlla umidità a profondità radicale e irrigazioni: il sintomo non prova da solo una carenza d’acqua.'})
             if signs & {'spots','insects'}:
                 hypotheses.append({'hypothesis':'Macchie o insetti richiedono identificazione in campo.','evidence':'Segnalazione dell’operatore, non identificazione automatica.','next_check':'Descrivi forma, posizione, evoluzione e presenza di organismi; consulta il tecnico o il bollettino locale.'})

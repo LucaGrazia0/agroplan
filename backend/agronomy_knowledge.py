@@ -3,7 +3,7 @@
 The application ships these methods; it does not silently scrape or execute
 instructions from manuals at runtime. Changes require a version and tests.
 """
-VERSION = '2026.11.23.2'
+VERSION = '2026.11.24.1'
 SOURCES = {
     'fao56_6': {
         'title': 'FAO Irrigation and Drainage Paper 56 (1998), capitolo 6',
@@ -14,8 +14,16 @@ SOURCES = {
     'fao56_8': {
         'title': 'FAO Irrigation and Drainage Paper 56 (1998), capitolo 8',
         'url': 'https://www.fao.org/4/x0490e/x0490e0e.htm',
-        'section': 'Equazione 82: acqua disponibile nella zona radicale',
-        'scope': 'TAW da capacità di campo, punto di appassimento e profondità radicale; non determina una dose irrigua.',
+        'section': 'Equazioni 82–84, 86–87: TAW, RAW, Ks ed esaurimento dalla misura del profilo',
+        'scope': 'Fotografia del profilo misurato, con p effettivo verificato dall’operatore; nessuna previsione o dose irrigua.',
+        'reviewed_on': '2026-11-24',
+    },
+    'fao29_water': {
+        'title': 'FAO Irrigation and Drainage Paper 29 Rev. 1 (1985), Water quality for agriculture',
+        'url': 'https://www.fao.org/4/t0234e/t0234e01.htm',
+        'section': 'Tabella 1 e relative assunzioni: ECw, SAR, salinità e infiltrazione',
+        'scope': 'Confronto orientativo dell’acqua irrigua, non del suolo. Linee guida per condizioni prevalentemente aride/semiaride, da verificare localmente.',
+        'reviewed_on': '2026-11-24',
     },
     'usda_ph': {
         'title': 'USDA NRCS, Soil Survey Manual (2017), capitolo 3',

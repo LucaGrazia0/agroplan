@@ -37,7 +37,16 @@ class _WaterParametersPanelState extends State<WaterParametersPanel> {
           'wilting_point_percent': 'Punto di appassimento (% volume)',
           'root_depth_m': 'Profondità radicale (m)',
           'moisture_percent': 'Umidità misurata (% volume)',
+          'depletion_fraction': 'Frazione p effettiva verificata (0–1 esclusi)',
+          'water_sample_date': 'Data del campione di acqua (AAAA-MM-GG)',
+          'water_ec_ds_m': 'ECw acqua irrigua a 25 °C (dS/m)',
+          'water_sar': 'SAR dello stesso campione di acqua',
         };
+  bool isDate(String key) =>
+      key == 'observed_at' ||
+      key == 'water_sample_date' ||
+      key == 'kc_from' ||
+      key == 'kc_to';
   Uri get uri => Uri.parse(
     '${api.apiBaseUrl}/agronomy/parameters/${Uri.encodeComponent(widget.parcelId)}',
   );
@@ -99,9 +108,7 @@ class _WaterParametersPanelState extends State<WaterParametersPanel> {
         final text = controls[key]!.text.trim();
         data[key] = text.isEmpty
             ? null
-            : (key.contains('_at') || key.startsWith('kc_')
-                  ? text
-                  : double.parse(text.replaceAll(',', '.')));
+            : (isDate(key) ? text : double.parse(text.replaceAll(',', '.')));
       }
       data['observed_at'] ??= DateTime.now().toIso8601String().substring(0, 10);
       if (data['kc'] == null) {
@@ -124,7 +131,7 @@ class _WaterParametersPanelState extends State<WaterParametersPanel> {
     } catch (_) {
       if (mounted) {
         setState(
-          () => message = 'Salvataggio non riuscito. Controlla date, intervallo Kc e capacità di campo maggiore del punto di appassimento; poi riprova.',
+          () => message = 'Salvataggio non riuscito. Controlla date, campione dell’acqua, p tra 0 e 1 esclusi, intervallo Kc e capacità di campo maggiore del punto di appassimento; poi riprova.',
         );
       }
     } finally {
@@ -138,13 +145,17 @@ class _WaterParametersPanelState extends State<WaterParametersPanel> {
       title: Text(
         widget.weather ? 'Parametri per ETc' : 'Parametri idrici misurati',
       ),
-      subtitle: const Text('Facoltativi · metodo FAO 56'),
+      subtitle: Text(
+        widget.weather
+            ? 'Facoltativi · metodo FAO 56'
+            : 'Facoltativi · profilo radicale e acqua irrigua · FAO',
+      ),
       childrenPadding: const EdgeInsets.all(14),
       children: [
         Text(
           widget.weather
               ? 'Inserisci un Kc verificato per coltura e fase, valido per l’intero periodo meteo da analizzare. Non viene dedotto dal BBCH.'
-              : 'Usa misure dello stesso profilo radicale. Percentuali in volume, non in peso; valori assenti restano vuoti. La riserva calcolata non è una dose irrigua.',
+              : 'Usa misure dello stesso profilo radicale. Percentuali in volume, non in peso; valori assenti restano vuoti. Per RAW e Ks serve un p effettivo già verificato per coltura e domanda evaporativa alla data della misura: nessun valore viene scelto automaticamente. L’acqua irrigua richiede un referto separato dal suolo; ECw e SAR devono appartenere allo stesso campione. I risultati non sono dosi irrigue.',
         ),
         if (busy) const LinearProgressIndicator(),
         if (failed)
@@ -166,10 +177,14 @@ class _WaterParametersPanelState extends State<WaterParametersPanel> {
                       decoration: InputDecoration(
                         labelText: entry.value,
                         border: const OutlineInputBorder(),
+                        helperText: entry.key == 'depletion_fraction'
+                            ? 'Non è una percentuale: per esempio 0,55. Va verificata anche la correzione locale per ETc (FAO 56, tabella 22).'
+                            : entry.key == 'water_ec_ds_m'
+                            ? 'Solo acqua a 25 °C: non copiare l’EC del suolo. 1 mS/cm = 1 dS/m; 1000 µS/cm = 1 dS/m.'
+                            : null,
+                        helperMaxLines: 4,
                       ),
-                      keyboardType:
-                          entry.key.contains('_at') ||
-                              entry.key.startsWith('kc_')
+                      keyboardType: isDate(entry.key)
                           ? TextInputType.datetime
                           : const TextInputType.numberWithOptions(
                               decimal: true,
@@ -177,12 +192,22 @@ class _WaterParametersPanelState extends State<WaterParametersPanel> {
                       validator: (value) {
                         final text = (value ?? '').trim();
                         if (text.isEmpty) {
+                          if (entry.key == 'water_sample_date' &&
+                              ((controls['water_ec_ds_m']?.text
+                                          .trim()
+                                          .isNotEmpty ??
+                                      false) ||
+                                  (controls['water_sar']?.text
+                                          .trim()
+                                          .isNotEmpty ??
+                                      false))) {
+                            return 'Indica la data dello stesso campione di acqua';
+                          }
                           return entry.key == 'observed_at'
                               ? 'Indica la data delle misure'
                               : null;
                         }
-                        if (entry.key.contains('_at') ||
-                            entry.key.startsWith('kc_')) {
+                        if (isDate(entry.key)) {
                           final d = DateTime.tryParse(text);
                           if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(text) ||
                               d == null ||
@@ -200,6 +225,10 @@ class _WaterParametersPanelState extends State<WaterParametersPanel> {
                                   (v <= 0 || v > 5)) ||
                               (entry.key == 'kc' && (v <= 0 || v > 2.5))) {
                             return 'Valore fuori intervallo';
+                          }
+                          if (entry.key == 'depletion_fraction' &&
+                              (v <= 0 || v >= 1)) {
+                            return 'p deve essere maggiore di 0 e minore di 1';
                           }
                         }
                         return null;
