@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone
 import json
 import hashlib
 from storage import connect
+from phenology import assess, parse_day
 
 
 def saved_context(parcel_id):
@@ -22,7 +23,8 @@ def build_crop_review(crop, soil, satellite, windows=None, geometry_available=Fa
     today = today or date.today()
     checks, gaps = [], []
     bbch = (crop or {}).get('latest_bbch')
-    quality = {'crop': crop is not None, 'bbch': bbch is not None,
+    phase = assess(crop,today)
+    quality = {'crop': crop is not None, 'bbch': phase['usable_for_current_analysis'],
                'soil': soil is not None, 'geometry': geometry_available,
                'weather_7_days': bool((windows or {}).get('7', {}).get('data_complete'))}
     if not crop:
@@ -30,13 +32,17 @@ def build_crop_review(crop, soil, satellite, windows=None, geometry_available=Fa
     elif not crop.get('sowing_date'):
         gaps.append('Data di semina assente: durata del ciclo e sviluppo termico non valutabili.')
     if bbch:
-        age = (today - date.fromisoformat(bbch['observed_at'])).days
-        if age > 21:
+        observed = parse_day(bbch.get('observed_at'))
+        age = (today - observed).days if observed else None
+        if age is not None and age > 21:
             checks.append({'title': 'Aggiorna il rilievo BBCH', 'evidence': f'Ultimo rilievo di {age} giorni fa.', 'action': 'Rileva la fase attuale in campo: non viene estrapolata da una vecchia osservazione.'})
-        elif age < 0:
+        elif age is None or age < 0:
             gaps.append('Il rilievo BBCH è datato nel futuro: correggi la data prima di interpretarlo.')
     else:
         gaps.append('Fase BBCH non disponibile: serve un rilievo in campo.')
+    gaps.extend(phase['quality_notes'])
+    if bbch and phase['status'] in {'unmapped','unsupported'}:
+        gaps.append(phase['description'])
     if soil:
         soil = {key: value for key, value in soil.items() if key not in {'notes','client_id'}}
         age = (today - date.fromisoformat(soil['sample_date'])).days
@@ -74,7 +80,7 @@ def build_crop_review(crop, soil, satellite, windows=None, geometry_available=Fa
                        'action': 'Controlla umidità del suolo e irrigazioni. Questo bilancio climatico non misura lo stress idrico né determina una dose irrigua.'})
     review = {'generated_at': datetime.now(timezone.utc).isoformat(),
             'summary': f"{(crop or {}).get('crop', 'Coltura non registrata')}: {sum(quality.values())} ambiti con dati su {len(quality)}. " + ('Sono necessari nuovi rilievi per completare la valutazione.' if gaps else 'Confronta gli indicatori con i rilievi in campo.'),
-            'coverage': quality, 'soil_context': soil, 'satellite': ndvi,
+            'coverage': quality, 'soil_context': soil, 'satellite': ndvi, 'phenology': phase,
             'checks': checks, 'missing_data': gaps,
             'method': 'Sintesi deterministica dei record aziendali e delle osservazioni disponibili; nessun dato inventato e nessun modello diagnostico o di resa.',
             'references': [{'title': 'FAO 56: ET₀ ed evapotraspirazione colturale', 'url': 'https://www.fao.org/4/x0490e/x0490e0a.htm'}]}

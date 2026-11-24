@@ -3,8 +3,15 @@
 The application ships these methods; it does not silently scrape or execute
 instructions from manuals at runtime. Changes require a version and tests.
 """
-VERSION = '2026.11.24.1'
+VERSION = '2026.11.24.2'
 SOURCES = {
+    'bbch_2001': {
+        'title': 'U. Meier (ed.), BBCH Monograph, 2a edizione (2001), copia MASAF',
+        'url': 'https://www.masaf.gov.it/flex/AppData/WebLive/Agrometeo/MIEPFY800_ORI/BBCHengl2001.pdf',
+        'section': 'Chiavi specifiche Cereals e Maize, pagine PDF 14–16 e 24–25; principi generali pagine 6–8',
+        'scope': 'Descrizione di codici osservati per frumento, orzo, avena, segale e mais; nessuna previsione o indicazione di trattamento.',
+        'reviewed_on': '2026-11-24',
+    },
     'fao56_6': {
         'title': 'FAO Irrigation and Drainage Paper 56 (1998), capitolo 6',
         'url': 'https://www.fao.org/4/x0490e/x0490e0b.htm',

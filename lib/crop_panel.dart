@@ -287,8 +287,29 @@ class _CropPanelState extends State<CropPanel> {
               ),
             ),
             for (final o in observations.take(5))
-              Text(
-                '${o['observed_at']} · BBCH ${o['bbch']} ${o['notes'] ?? ''}',
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${o['observed_at']} · BBCH ${o['bbch']} ${o['notes'] ?? ''}',
+                    ),
+                    if (o['phenology'] is Map) ...[
+                      Text('${o['phenology']['description']}'),
+                      if (o['phenology']['status'] == 'stale')
+                        const Text(
+                          'Rilievo storico: aggiorna la fase in campo.',
+                        ),
+                      for (final note
+                          in o['phenology']['quality_notes'] as List? ?? [])
+                        Text(
+                          '$note',
+                          style: TextStyle(color: Colors.orange.shade900),
+                        ),
+                    ],
+                  ],
+                ),
               ),
           ],
         ],

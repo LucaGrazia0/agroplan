@@ -1,7 +1,7 @@
 """Cicli colturali e osservazioni BBCH; database SQLite locale."""
 from datetime import date
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from storage import connect
 from auth import CurrentUser, require_parcel, require_cycle
@@ -17,6 +17,11 @@ class BBCHIn(BaseModel):
     observed_at: date
     bbch: int = Field(ge=0, le=99)
     notes: str | None = None
+    @model_validator(mode='after')
+    def observed_date(self):
+        if self.observed_at > date.today():
+            raise ValueError('La data del rilievo non può essere futura.')
+        return self
 
 def register_crop_routes(app):
     @app.get("/crop/cycles")
@@ -37,9 +42,11 @@ def register_crop_routes(app):
 
     @app.get("/crop/cycles/{cycle_id}/bbch")
     def list_bbch(cycle_id: int, user: CurrentUser):
-        require_cycle(cycle_id, user)
+        cycle = require_cycle(cycle_id, user)
         with connect() as db:
-            return [dict(r) for r in db.execute("SELECT * FROM agr_bbch_observations WHERE cycle_id=? ORDER BY observed_at DESC,id DESC", (cycle_id,))]
+            rows = [dict(r) for r in db.execute("SELECT * FROM agr_bbch_observations WHERE cycle_id=? ORDER BY observed_at DESC,id DESC", (cycle_id,))]
+        from phenology import assess
+        return [dict(r,phenology=assess(dict(cycle,latest_bbch=r))) for r in rows]
 
     @app.post("/crop/cycles/{cycle_id}/bbch", status_code=201)
     def add_bbch(cycle_id: int, item: BBCHIn, user: CurrentUser):

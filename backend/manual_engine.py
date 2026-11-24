@@ -148,8 +148,10 @@ def evaluate(review, crop=None, windows=None, parameters=None, today=None):
         domain['status'] = 'attention' if any(r['status']=='attention' for r in rows) else 'partial' if any(r['status'] in {'partial','missing'} for r in rows) else 'available'
         domain['computed_count'] = sum(r['status']=='available' for r in rows)
         domain['summary'] = {'soil': 'Referto, qualità dei dati e riserva idrica.', 'weather': 'Finestre meteorologiche e calcoli dell’acqua.', 'problems': 'Sintomi, possibili cause e verifiche in campo.'}[key]
-    source_ids = [s for d in domains.values() for f in d['findings'] for s in f['source_ids']]
+    from phenology import assess
+    phase = assess(crop,today) if crop is not None else review.get('phenology') or assess(None,today)
+    source_ids = [s for d in domains.values() for f in d['findings'] for s in f['source_ids']] + phase['source_ids']
     return {'engine_version': VERSION, 'domains': domains, 'references': references(source_ids),
             'method': 'Metodi numerici e regole documentati, con prerequisiti e provenienza per ogni risultato.',
-            'scope': 'pH descrittivo, qualità del referto, TAW, RAW/Ks alla misura, confronto ECw–SAR dell’acqua irrigua, P − ET₀, ETc standard e indagine dei sintomi. Tarature nutritive, modelli patogeno-specifici e dosi non implementati.',
-            'parameters': params}
+            'scope': 'pH descrittivo, qualità del referto, TAW, RAW/Ks alla misura, confronto ECw–SAR dell’acqua irrigua, P − ET₀, ETc standard, lettura BBCH specifica per coltura e indagine dei sintomi. Tarature nutritive, modelli patogeno-specifici e dosi non implementati.',
+            'parameters': params, 'phenology': phase}

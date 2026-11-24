@@ -27,7 +27,9 @@ def synthesize(review, crop=None, today=None):
     soil_valid = soil_date is not None and soil_date <= today
     bbch = crop.get('latest_bbch') or {}
     bbch_day = day(bbch.get('observed_at'))
-    valid_bbch = bbch_day is not None and 0 <= (today-bbch_day).days <= 21
+    from phenology import assess
+    phase = manual.get('phenology') or assess(crop,today)
+    valid_bbch = phase['usable_for_current_analysis']
     inputs = [
         {'id': 'crop', 'label': 'Coltura e fase', 'status': 'available' if crop and valid_bbch else 'partial' if crop else 'missing',
          'detail': f"{crop.get('crop', 'Coltura non registrata')}; " + (f"BBCH {bbch.get('bbch')} del {bbch_day}." if valid_bbch else 'fase attuale da rilevare.')},
@@ -47,6 +49,10 @@ def synthesize(review, crop=None, today=None):
                        'status':'available' if salinity.get('values') else 'missing',
                        'detail':salinity.get('evidence', 'Campione dell’acqua da completare.')})
     conclusions, gaps = [], []
+    if crop:
+        inputs[0]['detail'] = f"{phase['crop_label']}; " + (f"BBCH {bbch.get('bbch')} del {bbch_day}: {phase.get('description')}" if bbch else phase['description'])
+        if phase['status'] == 'stale': inputs[0]['detail'] += ' Rilievo storico: la fase attuale va verificata.'
+        if phase['quality_notes']: inputs[0]['detail'] += ' ' + ' '.join(phase['quality_notes'])
 
     def add(key, title, explanation, action, input_ids, sources=(), priority='check'):
         conclusions.append(dict(id=key, title=title, explanation=explanation, action=action,
@@ -64,6 +70,10 @@ def synthesize(review, crop=None, today=None):
         add('field_priority', 'La prima priorità è un sopralluogo',
             f"Il rilievo del {latest['observed_at']} indica sintomi intensi o diffusi. La priorità è organizzativa dell’app, non una soglia di trattamento.",
             'Verifica in campo estensione, evoluzione e radici; confronta i rilievi con un tecnico.', ['observations'], ['csu_diagnosis'], 'priority')
+    if phase['status'] == 'available':
+        add('crop_phase',f"{phase['crop_label']}: {phase.get('phase', 'fase registrata')}",
+            f"BBCH {phase['code']} osservato il {phase['observed_at']}: {phase['description']}. La descrizione riguarda il rilievo; non prevede la fase attuale né identifica cause dei sintomi.",
+            phase['next_check'],['crop'],['bbch_2001'],'monitor')
     if inferred:
         add('confirm_notes', 'Conferma i segnali descritti nelle note',
             'Nel testo riconosco: ' + ', '.join(e['label'] for e in inferred) + '. Sono indizi testuali, non osservazioni strutturate confermate.',
@@ -120,6 +130,11 @@ def synthesize(review, crop=None, today=None):
         add('yellowing_context', 'Ingiallimento: confronta foglie, radici e referto', explanation,
             'Annota se colpisce foglie giovani o vecchie e come è distribuito; verifica radici, umidità e metodi delle analisi prima di considerare una carenza.',
             ['observations', 'soil', 'water'], ['csu_diagnosis'] + (['usda_ph'] if ph.get('status') == 'available' else []))
+        if phase['status']=='available' and phase.get('principal_stage') in {8,9} and phase['code'] not in {97,99} and bbch_day==day(latest.get('observed_at')):
+            add('yellowing_phase','Ingiallimento: confronta anche la fase di maturazione registrata',
+                f"Nello stesso giorno è riportato BBCH {phase['code']} ({phase['description']}). La maturazione o la fine del ciclo è un contesto da confrontare, non una prova che l’ingiallimento sia fisiologico.",
+                'Verifica quali foglie sono coinvolte, distribuzione e radici; confronta piante rappresentative e conferma il BBCH prima di attribuire l’ingiallimento al ciclo.',
+                ['observations','crop'],['bbch_2001','csu_diagnosis'])
     if signs & {'spots', 'insects'}:
         add('identify_damage', 'Identifica macchie e organismi prima di intervenire',
             'Il rilievo segnala macchie o insetti; presenza e danno non identificano automaticamente specie o patogeno.',
