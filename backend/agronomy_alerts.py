@@ -1,6 +1,7 @@
 """Segnalazioni esplorative, NON diagnosi o modelli epidemiologici validati."""
 import math
 from datetime import date
+from weather_history import daily_window
 
 
 def _num(v):
@@ -21,8 +22,11 @@ def build_alerts(weather, crop):
     history = weather.get('history')
     if not isinstance(history, list):
         return alerts
-    rows = sorted((r for r in history if isinstance(r, dict) and isinstance(r.get('date'), str)),
-                  key=lambda r: r['date'])[-7:]
+    try:
+        end = date.fromisoformat(weather.get('historical_end', ''))
+    except (ValueError, TypeError):
+        end = None
+    rows = daily_window(history, 7, end)
     if not crop:
         return [_alert('general', 'Coltura non registrata', 'dati_insufficienti', [],
                        'Registra la coltura e il ciclo colturale.',

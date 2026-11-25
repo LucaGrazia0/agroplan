@@ -1,0 +1,108 @@
+name: AgroPlan IPA e APK
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/ios.yml'
+      - 'scripts/build_ios.py'
+      - 'android/**'
+      - 'ios/**'
+      - 'lib/**'
+      - 'pubspec.*'
+permissions:
+  contents: read
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r backend/requirements-dev.txt
+      - run: python -m pytest -q
+  ipa:
+    needs: analysis
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - name: Build compact Release IPA
+        run: python3 scripts/build_ios.py --api-url https://agroplan-backend.onrender.com
+      - name: Record package size
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          info = json.loads(Path('build/ios/ipa/AgroPlan-build.json').read_text())
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write(f"AgroPlan.ipa: **{info['size_mib']} MiB**, Release arm64, non firmata.\n\n")
+              summary.write('Da firmare e installare tramite iLoader/AltStore. Server HTTPS configurabile al primo avvio.\n')
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: AgroPlan-IPA
+          path: build/ios/ipa/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - uses: actions/upload-artifact@v7
+        with:
+          name: AgroPlan-debug-symbols
+          path: build/ios-symbols/
+          if-no-files-found: error
+          retention-days: 7
+  apk:
+    needs: analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - name: Build compact Android release
+        run: flutter build apk --release --target-platform android-arm64 --split-debug-info=build/android-symbols --dart-define=AGROPLAN_API_URL=https://agroplan-backend.onrender.com
+      - name: Record Android manifest
+        run: |
+          python3 - <<'PY'
+          import os, subprocess
+          from pathlib import Path
+          tool = sorted(Path(os.environ['ANDROID_HOME']).glob('build-tools/*/aapt'))[-1]
+          directory = Path('build/app/outputs/flutter-apk')
+          metadata = subprocess.check_output([str(tool), 'dump', 'badging', str(directory / 'app-release.apk')], text=True)
+          assert "package: name='it.lucagrazia.agroplan'" in metadata
+          assert "native-code: 'arm64-v8a'" in metadata
+          assert 'application-debuggable' not in metadata
+          (directory / 'AgroPlan-badging.txt').write_text(metadata)
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: AgroPlan-APK-build
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/flutter-apk/AgroPlan-badging.txt
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - uses: actions/upload-artifact@v7
+        with:
+          name: AgroPlan-Android-symbols
+          path: build/android-symbols/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

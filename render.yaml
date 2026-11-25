@@ -1,15 +1,25 @@
+# Prova gratuita: il database Free scade dopo 30 giorni. Esportare i dati
+# prima della scadenza; nessun upgrade a pagamento viene configurato.
 services:
   - type: web
     name: agroplan-backend
     runtime: python
     plan: free
-    rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    buildCommand: pip install -r backend/requirements-lock.txt
+    startCommand: uvicorn main:app --app-dir backend --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.15
+      - key: DATABASE_URL
+        fromDatabase:
+          name: agroplan-data-free
+          property: connectionString
       - key: COPERNICUS_CLIENT_ID
         sync: false
       - key: COPERNICUS_CLIENT_SECRET
         sync: false
+databases:
+  - name: agroplan-data-free
+    plan: free
+    databaseName: agroplan

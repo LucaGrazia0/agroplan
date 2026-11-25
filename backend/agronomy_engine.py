@@ -4,9 +4,11 @@ from typing import Optional
 import math
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from crop_api import connect
+from storage import connect
+from auth import CurrentUser, require_parcel
+from weather_history import daily_window
 from agronomy_alerts import build_alerts
 
 router = APIRouter(prefix="/agronomy", tags=["Agronomy"])
@@ -14,10 +16,17 @@ router = APIRouter(prefix="/agronomy", tags=["Agronomy"])
 
 class AgronomyRequest(BaseModel):
     parcel_id: str = Field(min_length=1)
-    latitude: float = Field(ge=35, le=48)
-    longitude: float = Field(ge=6, le=19)
+    latitude: Optional[float] = Field(default=None, ge=35, le=48)
+    longitude: Optional[float] = Field(default=None, ge=6, le=19)
     season: Optional[str] = None
     history_days: int = Field(default=60, ge=30, le=180)
+    include_satellite: bool = False
+
+    @model_validator(mode='after')
+    def coordinate_pair(self):
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError('Fornisci entrambe le coordinate oppure nessuna.')
+        return self
 
 
 def finite(value):
@@ -76,15 +85,8 @@ def crop_context(parcel_id, season):
         }
 
 
-def calculate_window(history, days):
-    rows = sorted(
-        (
-            row for row in history
-            if isinstance(row, dict)
-            and isinstance(row.get("date"), str)
-        ),
-        key=lambda row: row["date"],
-    )[-days:]
+def calculate_window(history, days, end=None):
+    rows = daily_window(history, days, end)
 
     keys = {
         "rain": "precipitation_sum",
@@ -161,7 +163,7 @@ def build_indicators(weather, crop):
         )
 
     windows = {
-        str(days): calculate_window(history, days)
+        str(days): calculate_window(history, days, date.fromisoformat(weather["historical_end"]))
         for days in (7, 15, 30)
     }
 
@@ -183,8 +185,8 @@ def build_indicators(weather, crop):
 
         if observation_date > end:
             warnings.append(
-                "L'ultima osservazione BBCH è successiva alla fine "
-                "dello storico meteorologico."
+                "Lo storico meteo non copre ancora la data dell’ultimo BBCH; "
+                "la data reale del rilievo viene mantenuta."
             )
 
     for days, result in windows.items():
@@ -218,27 +220,52 @@ def build_indicators(weather, crop):
     }
 
 
-def register_agronomy_routes(app, weather_handler, weather_request_class):
+def register_agronomy_routes(app, weather_handler, weather_request_class, satellite_handler=None):
+    @router.get('/overview')
+    def overview(user: CurrentUser):
+        from crop_analysis import farm_overview
+        return farm_overview(user)
+
     @router.post("/analyze")
-    async def analyze(req: AgronomyRequest):
+    async def analyze(req: AgronomyRequest, user: CurrentUser):
+        parcel = require_parcel(req.parcel_id, user)
         crop = crop_context(req.parcel_id, req.season)
-
-        weather = await weather_handler(
-            weather_request_class(
-                latitude=req.latitude,
-                longitude=req.longitude,
-                history_days=req.history_days,
+        import json
+        payload = json.loads(parcel['payload']) if parcel['payload'] else {}
+        points = payload.get('points', [])
+        latitude = sum(p['lat'] for p in points)/len(points) if points else req.latitude
+        longitude = sum(p['lng'] for p in points)/len(points) if points else req.longitude
+        history = []
+        try:
+            if latitude is None or longitude is None:
+                raise HTTPException(422, 'Coordinate assenti')
+            weather = await weather_handler(
+                weather_request_class(latitude=latitude, longitude=longitude, history_days=req.history_days)
             )
-        )
-
-        result = build_indicators(weather, crop)
-
-        return {
+            result = build_indicators(weather, crop)
+            history = weather['history']
+        except HTTPException:
+            result = {'crop_context': crop, 'windows': {}, 'monitoring_alerts': [],
+                      'warnings': ['Coordinate assenti: analizzo i record salvati senza attribuire dati meteo a una posizione presunta.' if latitude is None else 'Meteo non disponibile: la sintesi usa solo i record salvati.'], 'source': 'Record aziendali'}
+        from crop_analysis import saved_context, build_crop_review
+        if req.include_satellite and satellite_handler and points:
+            try:
+                await satellite_handler(req.parcel_id, points)
+            except HTTPException:
+                result['warnings'].append('Aggiornamento satellitare non disponibile: mantengo le osservazioni salvate.')
+        soil, satellite = saved_context(req.parcel_id)
+        result['crop_review'] = build_crop_review(crop, soil, satellite, result['windows'], bool(points))
+        from field_records import observations, save_result
+        from evidence_engine import integrate
+        from analysis_parameters import parameters
+        result['crop_review'] = integrate(result['crop_review'], observations(req.parcel_id),crop=crop,windows=result['windows'],parameters=parameters(req.parcel_id),weather_history=history)
+        response = {
             "parcel_id": req.parcel_id,
-            "latitude": req.latitude,
-            "longitude": req.longitude,
+            "latitude": latitude,
+            "longitude": longitude,
             **result,
         }
+        response['result_id'] = save_result(req.parcel_id,response)
+        return response
 
-    for route in router.routes:
-        app.router.routes.append(route)
+    app.include_router(router)

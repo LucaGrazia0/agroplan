@@ -1,0 +1,206 @@
+"""Turn validated domain results into a parcel-specific, actionable response.
+
+This layer composes the documented methods; it does not invent diagnostic
+thresholds, probabilities, missing measurements or treatment prescriptions.
+"""
+from datetime import date
+from agronomy_knowledge import VERSION
+from manual_engine import day, number
+
+
+def synthesize(review, crop=None, today=None):
+    today = today or date.today()
+    manual = review.get('manual_assessment') or {}
+    findings = {f['rule_id']: f for domain in manual.get('domains', {}).values() for f in domain['findings']}
+    crop = crop or {}
+    soil = review.get('soil_context') or {}
+    visual = review.get('visual_context') or {}
+    latest = visual.get('latest')
+    params = manual.get('parameters') or {}
+    satellite = review.get('satellite') or {}
+    water = findings.get('soil.available_water', {})
+    weather = findings.get('weather.climatic_balance', {})
+    context = review.get('observation_weather')
+    observation_weather = findings.get('weather.observation_context')
+    weather_input = observation_weather or weather
+    stress = findings.get('soil.water_stress', {})
+    salinity = findings.get('soil.irrigation_salinity', {})
+    infiltration = findings.get('soil.irrigation_infiltration', {})
+    soil_date = day(soil.get('sample_date'))
+    soil_valid = soil_date is not None and soil_date <= today
+    bbch = crop.get('latest_bbch') or {}
+    bbch_day = day(bbch.get('observed_at'))
+    from phenology import assess
+    phase = manual.get('phenology') or assess(crop,today)
+    valid_bbch = phase['usable_for_current_analysis']
+    inputs = [
+        {'id': 'crop', 'label': 'Coltura e fase', 'status': 'available' if crop and valid_bbch else 'partial' if crop else 'missing',
+         'detail': f"{crop.get('crop', 'Coltura non registrata')}; " + (f"BBCH {bbch.get('bbch')} del {bbch_day}." if valid_bbch else 'fase attuale da rilevare.')},
+        {'id': 'soil', 'label': 'Referto del suolo', 'status': 'available' if soil_valid else 'missing',
+         'detail': f"Campione del {soil_date}; pH {soil.get('ph') if soil.get('ph') is not None else 'assente'}." if soil_valid else 'Nessun campione con data valida.'},
+        {'id': 'weather', 'label': 'Meteo prima del rilievo' if context else 'Meteo', 'status': weather_input.get('status', 'missing'),
+         'detail': weather_input.get('evidence', 'Contesto meteo non disponibile.')},
+        {'id': 'observations', 'label': 'Rilievi sulle piante', 'status': 'available' if latest else 'stale' if visual.get('record_count') else 'missing',
+         'detail': f"Rilievo del {latest['observed_at']}; {visual.get('recent_count', 0)} rilievi negli ultimi 14 giorni." if latest else 'Nessun rilievo negli ultimi 14 giorni.'},
+        {'id': 'satellite', 'label': 'Satellite', 'status': 'available' if satellite.get('delta') is not None else 'missing',
+         'detail': f"NDVI: variazione {satellite['delta']:+.3f}; ultima acquisizione {satellite['latest']['observed_at']}." if satellite.get('delta') is not None else 'Confronto tra due acquisizioni valide non disponibile.'},
+        {'id': 'water', 'label': 'Misure idriche', 'status': 'available' if water.get('status') == 'available' else 'missing',
+         'detail': water.get('evidence', 'Misure del profilo radicale non disponibili.')},
+    ]
+    if salinity or infiltration:
+        inputs.append({'id':'irrigation_water','label':'Acqua irrigua',
+                       'status':'available' if salinity.get('values') else 'missing',
+                       'detail':salinity.get('evidence', 'Campione dell’acqua da completare.')})
+    conclusions, gaps = [], []
+    if crop:
+        inputs[0]['detail'] = f"{phase['crop_label']}; " + (f"BBCH {bbch.get('bbch')} del {bbch_day}: {phase.get('description')}" if bbch else phase['description'])
+        if phase['status'] == 'stale': inputs[0]['detail'] += ' Rilievo storico: la fase attuale va verificata.'
+        if phase['quality_notes']: inputs[0]['detail'] += ' ' + ' '.join(phase['quality_notes'])
+
+    def add(key, title, explanation, action, input_ids, sources=(), priority='check'):
+        conclusions.append(dict(id=key, title=title, explanation=explanation, action=action,
+                                input_ids=input_ids, source_ids=list(sources), priority=priority))
+
+    signs = set((latest or {}).get('symptoms', [])) - {'no_symptoms'}
+    inferred = [e for e in (review.get('integrated_assessment') or {}).get('evidence', []) if e.get('source') == 'Parola nella nota da confermare']
+    measured = day(params.get('observed_at'))
+    moisture, fc, wp = (number(params.get(k)) for k in ('moisture_percent', 'field_capacity_percent', 'wilting_point_percent'))
+    same_day_measured = (water.get('status') == 'available' and moisture is not None and measured is not None
+                         and 0 <= (today-measured).days <= 7 and measured == day((latest or {}).get('observed_at')))
+    same_day_dry = bool(same_day_measured and moisture <= wp)
+    urgent = bool(signs and (latest.get('severity') == 'high' or (number(latest.get('affected_percent')) or 0) >= 30))
+    if urgent:
+        add('field_priority', 'La prima priorità è un sopralluogo',
+            f"Il rilievo del {latest['observed_at']} indica sintomi intensi o diffusi. La priorità è organizzativa dell’app, non una soglia di trattamento.",
+            'Verifica in campo estensione, evoluzione e radici; confronta i rilievi con un tecnico.', ['observations'], ['csu_diagnosis'], 'priority')
+    if phase['status'] == 'available':
+        add('crop_phase',f"{phase['crop_label']}: {phase.get('phase', 'fase registrata')}",
+            f"BBCH {phase['code']} osservato il {phase['observed_at']}: {phase['description']}. La descrizione riguarda il rilievo; non prevede la fase attuale né identifica cause dei sintomi.",
+            phase['next_check'],['crop'],['bbch_2001'],'monitor')
+    if inferred:
+        add('confirm_notes', 'Conferma i segnali descritti nelle note',
+            'Nel testo riconosco: ' + ', '.join(e['label'] for e in inferred) + '. Sono indizi testuali, non osservazioni strutturate confermate.',
+            'Se presenti, seleziona i sintomi nel rilievo e indica distribuzione e percentuale di piante.', ['observations'], ['csu_diagnosis'])
+    if stress.get('values', {}).get('ks') is not None:
+        values=stress['values']
+        fresh=measured is not None and 0 <= (today-measured).days <= 7
+        add('measured_water_model', 'Riserva facilmente utilizzabile: confronto alla data della misura',
+            stress['evidence'] + ' ' + stress['interpretation'] +
+            (' I 7 giorni sono un criterio applicativo di aggiornamento.' if fresh else ' La misura è storica: non descrive lo stato attuale, va aggiornata.'),
+            stress['next_check'], ['water'], ['fao56_8'], 'check' if fresh and values['threshold_exceeded'] else 'monitor')
+    for f in (salinity,infiltration):
+        if f.get('status') in {'attention','partial'}:
+            add(f['rule_id'],f['title'],f['evidence']+' '+f['interpretation']+
+                ' Linee guida orientative, soprattutto per climi aridi/semiaridi: verificare applicabilità locale.',
+                f['next_check'],['irrigation_water'],['fao29_water'])
+    aligned = 'problems.water_context' in findings
+    if 'wilting' in signs and same_day_dry:
+        add('wilting_soil', 'Appassimento e misura del suolo indicano una verifica idrica prioritaria',
+            f'Il rilievo e la misura sono entrambi del {measured}: umidità {moisture:g}% in volume, punto di appassimento indicato {wp:g}%. '
+            'Nel modello del profilo il valore è compatibile con disponibilità idrica molto ridotta. La coincidenza sostiene questa pista, senza provare che sia l’unica causa.',
+            'Verifica subito misura, profondità e stato delle radici; confronta irrigazioni e distribuzione dei sintomi con un tecnico prima di decidere l’intervento.',
+            ['observations', 'water'], ['fao56_8', 'csu_diagnosis'])
+    elif 'wilting' in signs and same_day_measured and moisture>=fc:
+        add('wilting_wet_profile', 'Appassimento con profilo misurato umido: controlla l’assorbimento',
+            f'Il rilievo e la misura sono del {measured}: umidità {moisture:g}% vol., capacità di campo {fc:g}% vol. '
+            'La misura non sostiene una scarsità d’acqua in quel profilo. Non esclude problemi radicali, di assorbimento o di rappresentatività della misura.',
+            'Controlla misura e profondità, radici e drenaggio; non dedurre la necessità di altra acqua dal solo appassimento.',
+            ['observations','water'], ['fao56_8','csu_diagnosis'])
+    elif 'wilting' in signs and same_day_measured and stress.get('values',{}).get('ks') is not None:
+        values=stress['values']
+        add('wilting_raw', 'Appassimento: confronto con la riserva facilmente utilizzabile',
+            f'Rilievo e misura del profilo sono del {measured}. Dr {values["depletion_mm"]:g} mm, RAW {values["raw_mm"]:g} mm, Ks {values["ks"]:g}, con p effettivo fornito dall’operatore. ' +
+            ('Nel modello Dr supera RAW e sostiene una possibile limitazione idrica della traspirazione. Non prova che questa sia l’unica causa.' if values['threshold_exceeded'] else
+             'Dr non supera RAW: il modello non sostiene una limitazione idrica della traspirazione in quel profilo. Non esclude salinità o problemi di assorbimento.'),
+            'Conferma misura e p effettivo; confronta radici e piante sane e interessate. Il valore non determina una dose irrigua.',
+            ['observations','water'],['fao56_8','csu_diagnosis'])
+    elif 'wilting' in signs and aligned:
+        balance = context['climatic_balance_mm']
+        from weather_history import context_description
+        add('wilting_weather', 'Appassimento: verifica prima acqua e radici',
+            context_description(context) + ' ' +
+            ('Pioggia ed ET₀ non sono confrontabili numericamente sui dati disponibili; temperature e piogge presenti restano un contesto parziale.' if balance is None else
+             'Il saldo negativo sui giorni disponibili rende utile verificare la disponibilità idrica, ma non prova uno stress della coltura.' if balance < 0 else
+             'Il saldo non negativo sui giorni disponibili non garantisce umidità sufficiente e non esclude problemi radicali o di drenaggio.') +
+            ' Questo contesto storico non determina cosa è accaduto nei giorni mancanti o la causa del sintomo.',
+            'Misura l’umidità alla profondità radicale e controlla irrigazioni, drenaggio e stato delle radici prima di decidere un intervento.',
+            ['observations', 'weather', 'water'], ['fao56_8', 'csu_diagnosis'])
+    elif 'wilting' in signs:
+        add('wilting_unaligned', 'Appassimento: la causa non è ancora distinguibile',
+            'Il sintomo è segnalato, ma non ci sono dati giornalieri utilizzabili nelle due settimane precedenti. La data del rilievo resta invariata.',
+            'Controlla umidità e radici; aggiorna il contesto meteo precedente al rilievo quando disponibile.', ['observations', 'weather', 'water'], ['csu_diagnosis'])
+    ph = findings.get('soil.ph_class', {})
+    if 'yellowing' in signs:
+        explanation = 'L’ingiallimento può avere cause diverse; il solo sintomo non identifica una carenza.'
+        if ph.get('status') == 'available':
+            explanation += f" Il referto del {soil_date} riporta pH {ph['values']['ph']:g} ({ph['values']['class']}): è un contesto da confrontare, non una prova della causa."
+        add('yellowing_context', 'Ingiallimento: confronta foglie, radici e referto', explanation,
+            'Annota se colpisce foglie giovani o vecchie e come è distribuito; verifica radici, umidità e metodi delle analisi prima di considerare una carenza.',
+            ['observations', 'soil', 'water'], ['csu_diagnosis'] + (['usda_ph'] if ph.get('status') == 'available' else []))
+        if phase['status']=='available' and phase.get('principal_stage') in {8,9} and phase['code'] not in {97,99} and bbch_day==day(latest.get('observed_at')):
+            add('yellowing_phase','Ingiallimento: confronta anche la fase di maturazione registrata',
+                f"Nello stesso giorno è riportato BBCH {phase['code']} ({phase['description']}). La maturazione o la fine del ciclo è un contesto da confrontare, non una prova che l’ingiallimento sia fisiologico.",
+                'Verifica quali foglie sono coinvolte, distribuzione e radici; confronta piante rappresentative e conferma il BBCH prima di attribuire l’ingiallimento al ciclo.',
+                ['observations','crop'],['bbch_2001','csu_diagnosis'])
+    if signs & {'spots', 'insects'}:
+        add('identify_damage', 'Identifica macchie e organismi prima di intervenire',
+            'Il rilievo segnala macchie o insetti; presenza e danno non identificano automaticamente specie o patogeno.',
+            'Rileva forma, posizione, estensione ed evoluzione delle lesioni e identifica gli organismi con un tecnico o un servizio diagnostico.', ['observations'], ['csu_diagnosis'])
+    if 'uneven_growth' in signs:
+        add('growth_distribution', 'Confronta le zone con sviluppo diverso',
+            'La crescita irregolare richiede un confronto tra zone, fase colturale, radici e condizioni del suolo.',
+            'Confronta piante sane e interessate nelle stesse condizioni; annota distribuzione, lavorazioni e irrigazioni.', ['observations', 'crop', 'soil'], ['csu_diagnosis'])
+    if not ('wilting' in signs and same_day_dry) and water.get('status') == 'available' and moisture is not None and measured and 0 <= (today-measured).days <= 7 and (moisture <= wp or moisture > fc):
+        add('water_measurement', 'Verifica il valore di umidità del profilo',
+            f'La misura del {measured} è {moisture:g}% in volume; capacità di campo {fc:g}%, appassimento {wp:g}%. ' +
+            ('Il valore è pari o inferiore al punto di appassimento inserito.' if moisture <= wp else 'Il valore supera la capacità di campo inserita.') +
+            ' Non basta per attribuire una causa ai sintomi; i 7 giorni sono un criterio applicativo di aggiornamento.',
+            'Verifica misura, unità e rappresentatività del profilo e controlla le piante nella stessa data.', ['water', 'observations'], ['fao56_8'])
+    texture = findings.get('soil.texture_quality', {})
+    if texture.get('status') == 'attention':
+        add('quality_first', 'Correggi la tessitura prima di interpretarla', texture['evidence'], texture['next_check'], ['soil'], priority='data_quality')
+    if satellite.get('delta') is not None:
+        delta = satellite['delta']
+        add('satellite_context', 'Confronta il segnale satellitare con il campo',
+            f"NDVI {satellite['latest']['mean']:.3f} il {satellite['latest']['observed_at']}; variazione {delta:+.3f} dal {satellite['previous']['observed_at']}. La variazione non identifica da sola la causa.",
+            'Confronta le date delle acquisizioni con il rilievo e la fase BBCH; verifica in campo le aree diverse.', ['satellite', 'observations', 'crop'], ['csu_diagnosis'])
+    if latest and 'no_symptoms' in latest.get('symptoms', []):
+        add('reported_no_symptoms', 'Nel rilievo non sono segnalati sintomi',
+            f"L’operatore non ha osservato sintomi evidenti il {latest['observed_at']}. Questo non certifica lo stato sanitario della particella.",
+            'Ripeti i rilievi nel tempo e confrontali con fase colturale e dati ambientali.', ['observations', 'crop'], ['csu_diagnosis'], 'monitor')
+    if not signs and weather.get('status') == 'available':
+        values = weather['values']
+        add('water_context', 'Il meteo orienta il controllo dell’acqua',
+            f"Nel periodo disponibile P − ET₀ è {values['balance_mm']:g} mm. " +
+            (f"La capacità di riserva calcolata è {water['values']['taw_mm']:g} mm, ma non è la quantità attualmente disponibile né una dose irrigua." if water.get('status') == 'available' else 'La riserva radicale non è calcolabile con i dati attuali.'),
+            'Confronta misure di umidità, irrigazioni e piogge effettivamente infiltrate prima di decidere come gestire l’acqua.', ['weather', 'water'], ['fao56_6', 'fao56_8'], 'monitor')
+    for text in review.get('missing_data', []):
+        if text not in gaps: gaps.append(text)
+    for text in (review.get('integrated_assessment') or {}).get('questions', []):
+        if text not in gaps: gaps.append(text)
+    if crop and not valid_bbch:
+        gaps.append('Registra una fase BBCH attuale nella sezione Coltura: non estrapolo la fase da un rilievo vecchio o futuro.')
+    for f in findings.values():
+        if f['status'] == 'missing' and f['next_check'] not in gaps: gaps.append(f['next_check'])
+    if not latest:
+        gaps.insert(0, 'Registra cosa osservi sulle piante, anche se non noti sintomi: serve per un ritorno sullo stato del campo.')
+    sufficient = any(i['status'] == 'available' for i in inputs)
+    water_check = bool((measured is not None and 0 <= (today-measured).days <= 7 and stress.get('values',{}).get('threshold_exceeded')) or any(f.get('status')=='attention' for f in (salinity,infiltration)))
+    status = 'priority_check' if urgent else 'needs_verification' if signs or inferred or water_check else 'incomplete' if gaps else 'monitoring'
+    headline = ('Sopralluogo prioritario per i sintomi segnalati' if urgent else
+                'Ci sono segnali da verificare incrociando i dati' if signs else
+                'Conferma i sintomi descritti nel testo' if inferred else
+                'Verifica le misure dell’acqua e del profilo radicale' if water_check else
+                'Quadro disponibile: continua il monitoraggio' if not gaps else
+                'Valutazione parziale: completa il quadro del campo' if sufficient else
+                'Servono input per iniziare la valutazione')
+    summary = ('La valutazione parte dal rilievo sulle piante e lo confronta con le misure compatibili per data e metodo.' if signs else
+               'I dati disponibili orientano i controlli; i collegamenti non supportati restano esplicitamente da verificare.' if sufficient else
+               'Inserisci almeno i dati colturali e un rilievo delle piante; aggiungi referto e meteo per distinguere le possibili cause.')
+    priority_order = {'priority': 0, 'data_quality': 1, 'check': 2, 'monitor': 3}
+    conclusions.sort(key=lambda c: priority_order[c['priority']])
+    next_steps = list(dict.fromkeys([c['action'] for c in conclusions] + gaps))
+    return dict(engine_version=VERSION, status=status, headline=headline, summary=summary, inputs=inputs,
+                conclusions=conclusions, next_steps=next_steps, missing_inputs=gaps,
+                references=manual.get('references', []),
+                limits='Valutazione motivata dei dati inseriti: ipotesi da verificare, senza diagnosi automatica o dosi di trattamento.')

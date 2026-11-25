@@ -1,0 +1,230 @@
+{
+  "version": "wheat-vision-research-2026.11.25",
+  "classes": [
+    "brown_rust",
+    "healthy",
+    "powdery_mildew",
+    "septoria",
+    "yellow_rust"
+  ],
+  "backbone": "torchvision MobileNetV3 Small IMAGENET1K_V1, frozen",
+  "source": "https://zenodo.org/records/7573133",
+  "license": "CC BY 4.0",
+  "creators": [
+    "Megan C. Long",
+    "Matthew Hartley",
+    "Richard J. Morris",
+    "James K. M. Brown"
+  ],
+  "dataset_manifest_sha256": "d722061adb59d83f7ce9b9201e19def5ce62fb23b3f01e19fad1f56c49f6fc85",
+  "model_sha256": "254c258747e8d7dbff6e24fc554b15284cec5ea7849d433740e2dc8f0a230c3d",
+  "preprocessing": {
+    "resize_short_edge": 256,
+    "center_crop": 224,
+    "rescale": 255,
+    "mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "std": [
+      0.229,
+      0.224,
+      0.225
+    ]
+  },
+  "selected_epoch": 37,
+  "selection_metric": "validation balanced accuracy",
+  "reports": {
+    "train": {
+      "accuracy": 0.959770143032074,
+      "balanced_accuracy": 0.9733859300613403,
+      "recall_by_class": [
+        1.0,
+        1.0,
+        0.991150438785553,
+        0.9176954627037048,
+        0.9580838084220886
+      ],
+      "confusion_matrix": [
+        [
+          89,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          84,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          112,
+          0,
+          0
+        ],
+        [
+          1,
+          2,
+          5,
+          223,
+          12
+        ],
+        [
+          2,
+          0,
+          1,
+          4,
+          160
+        ]
+      ],
+      "count": 696,
+      "selective_policy": {
+        "minimum_model_score": 0.85,
+        "minimum_margin": 0.25,
+        "accepted_count": 508,
+        "coverage": 0.7298850417137146,
+        "accuracy_on_accepted": 0.9960629940032959
+      }
+    },
+    "validation": {
+      "accuracy": 0.7894737124443054,
+      "balanced_accuracy": 0.7767394781112671,
+      "recall_by_class": [
+        0.8999999761581421,
+        0.7368420958518982,
+        0.5833333134651184,
+        0.8301886916160583,
+        0.8333333134651184
+      ],
+      "confusion_matrix": [
+        [
+          18,
+          0,
+          0,
+          1,
+          1
+        ],
+        [
+          1,
+          14,
+          4,
+          0,
+          0
+        ],
+        [
+          1,
+          2,
+          14,
+          2,
+          5
+        ],
+        [
+          1,
+          2,
+          3,
+          44,
+          3
+        ],
+        [
+          1,
+          0,
+          2,
+          3,
+          30
+        ]
+      ],
+      "count": 152,
+      "selective_policy": {
+        "minimum_model_score": 0.85,
+        "minimum_margin": 0.25,
+        "accepted_count": 78,
+        "coverage": 0.5131579041481018,
+        "accuracy_on_accepted": 0.8846153616905212
+      }
+    },
+    "test": {
+      "accuracy": 0.8410596251487732,
+      "balanced_accuracy": 0.8527060747146606,
+      "recall_by_class": [
+        0.9473684430122375,
+        0.8421052694320679,
+        0.875,
+        0.849056601524353,
+        0.75
+      ],
+      "confusion_matrix": [
+        [
+          18,
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          1,
+          16,
+          2,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          21,
+          1,
+          1
+        ],
+        [
+          0,
+          1,
+          3,
+          45,
+          4
+        ],
+        [
+          4,
+          1,
+          1,
+          3,
+          27
+        ]
+      ],
+      "count": 151,
+      "selective_policy": {
+        "minimum_model_score": 0.85,
+        "minimum_margin": 0.25,
+        "accepted_count": 88,
+        "coverage": 0.5827814340591431,
+        "accuracy_on_accepted": 0.9545454382896423
+      }
+    }
+  },
+  "experimental": true,
+  "validated_on_italian_fields": false,
+  "limitations": [
+    "Single collection; no independent Italian farm validation.",
+    "Five labels only, all wheat. No barley or maize recognition is supported.",
+    "Group split uses exact pixels and 64-bit dHash distance <=4; specimen/site IDs are unavailable.",
+    "Near-duplicate grouping reduces but cannot prove absence of leakage.",
+    "A healthy label is not proof of absence of unrepresented disease.",
+    "Reported results are an internal grouped holdout, not independent clinical/field validation.",
+    "Scores are uncalibrated model outputs, not disease probabilities.",
+    "Score and margin thresholds are application rejection gates; unknown diseases can still obtain a high score.",
+    "Only wheat leaves and these five labels are in scope; no prediction for other crops or organs."
+  ],
+  "training_seconds": 35.95,
+  "bundle_sha256": "784947d8f3b48c0e94dfdf292efa41120b81cbb18f6b45e6b80af4c9e61c2c1f",
+  "training_dependencies": {
+    "torch": "2.15.0",
+    "torchvision": "0.29.2",
+    "onnx": "1.23.2",
+    "numpy": "2.5.5",
+    "Pillow": "13.0.0"
+  }
+}

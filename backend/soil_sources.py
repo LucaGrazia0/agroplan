@@ -75,12 +75,12 @@ async def search_soil(points):
                           'FEATURE_COUNT':'5','FORMAT':'image/png','STYLES':''}
                 r = await client.get(RER_WMS, params=params)
                 r.raise_for_status()
-                txt = r.text[:4000]
+                txt = r.text[:16000]
                 if '<ServiceException' in txt or '<ExceptionReport' in txt:
                     raise ValueError('GetFeatureInfo non supportato dal servizio')
-                return {'latitude':lat,'longitude':lon,'response':txt}
+                return {'latitude':lat,'longitude':lon,'response':txt,'soil_units':parse_soil_units(txt)}
             checked = await asyncio.gather(*(get_info(*p) for p in eligible[:5]),return_exceptions=True)
-            results = [x for x in checked if isinstance(x,dict) and x['response'].strip()]
+            results = [x for x in checked if isinstance(x,dict) and x.get('soil_units')]
             failures = [str(x) for x in checked if isinstance(x,Exception)]
             return {'status':'ok' if results else 'unavailable', 'sources_checked':[provider],
                     'results':results, 'sample_count':len(eligible[:5]),
@@ -88,3 +88,39 @@ async def search_soil(points):
                     'warnings':failures[:2]}
     except (httpx.HTTPError, ValueError, ET.ParseError) as e:
         return {'status':'unavailable','sources_checked':[provider],'results':[], 'message':f'Servizio cartografico temporaneamente non disponibile: {type(e).__name__}'}
+
+
+def parse_soil_units(raw):
+    """Read the provider's flattened semicolon records without guessing lab data.
+
+    Descriptive fields can themselves contain unescaped semicolons, so only
+    the stable identifier/name prefix is labelled. Descriptive fragments keep
+    their original text rather than being assigned to shifted column names.
+    """
+    import csv
+    import re
+    units=[]
+    for table in re.split(r'@Carta_Suoli_50k\s*', raw)[1:]:
+        try:
+            cells=[cell.strip() for cell in next(csv.reader([table],delimiter=';'))]
+            end=next(i for i,cell in enumerate(cells) if cell.upper()=='SHAPE.LEN')+1
+        except (csv.Error,StopIteration):
+            continue
+        headers=cells[:end]
+        values=cells[end:]
+        if len(values)<9 or not values[0].isdigit() or 'NOME_UC' not in headers:
+            continue
+        name_index=headers.index('NOME_UC')
+        code_index=headers.index('Sigla unità cart.') if 'Sigla unità cart.' in headers else None
+        name=values[name_index] if name_index<len(values) else ''
+        if not name:
+            continue
+        descriptions=[]
+        for cell in values[name_index:]:
+            if cell.startswith('http') or len(cell)<24 or len(cell)>2000:
+                continue
+            if re.search(r'[a-zA-ZÀ-ÿ]{4,}\s+[a-zA-ZÀ-ÿ]{3,}',cell) and cell not in descriptions:
+                descriptions.append(cell)
+        units.append({'name':name,'code':values[code_index] if code_index is not None else '',
+                      'descriptions':descriptions[:8]})
+    return units

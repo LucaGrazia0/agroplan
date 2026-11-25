@@ -1,30 +1,10 @@
 """Cicli colturali e osservazioni BBCH; database SQLite locale."""
-import os
-import sqlite3
-from pathlib import Path
 from datetime import date
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-DB = Path(os.getenv("AGROPLAN_DB_PATH", str(Path(__file__).with_name("agroplan.db"))))
-
-def connect():
-    DB.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB, timeout=15)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
-
-def initialize():
-    with connect() as db:
-        db.execute("""CREATE TABLE IF NOT EXISTS agr_crop_cycles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, parcel_id TEXT NOT NULL,
-            season TEXT NOT NULL, crop TEXT NOT NULL, variety TEXT,
-            sowing_date TEXT, UNIQUE(parcel_id, season))""")
-        db.execute("""CREATE TABLE IF NOT EXISTS agr_bbch_observations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, cycle_id INTEGER NOT NULL,
-            observed_at TEXT NOT NULL, bbch INTEGER NOT NULL CHECK(bbch BETWEEN 0 AND 99),
-            notes TEXT, FOREIGN KEY(cycle_id) REFERENCES agr_crop_cycles(id) ON DELETE CASCADE)""")
+from storage import connect
+from auth import CurrentUser, require_parcel, require_cycle
 
 class CycleIn(BaseModel):
     parcel_id: str = Field(min_length=1)
@@ -37,16 +17,22 @@ class BBCHIn(BaseModel):
     observed_at: date
     bbch: int = Field(ge=0, le=99)
     notes: str | None = None
+    @model_validator(mode='after')
+    def observed_date(self):
+        if self.observed_at > date.today():
+            raise ValueError('La data del rilievo non può essere futura.')
+        return self
 
 def register_crop_routes(app):
-    initialize()
     @app.get("/crop/cycles")
-    def list_cycles(parcel_id: str):
+    def list_cycles(parcel_id: str, user: CurrentUser):
+        require_parcel(parcel_id, user)
         with connect() as db:
             return [dict(r) for r in db.execute("SELECT * FROM agr_crop_cycles WHERE parcel_id=? ORDER BY season DESC", (parcel_id,))]
 
     @app.post("/crop/cycles", status_code=201)
-    def save_cycle(item: CycleIn):
+    def save_cycle(item: CycleIn, user: CurrentUser):
+        require_parcel(item.parcel_id, user)
         with connect() as db:
             db.execute("""INSERT INTO agr_crop_cycles(parcel_id, season, crop, variety, sowing_date)
                 VALUES(?,?,?,?,?) ON CONFLICT(parcel_id,season) DO UPDATE SET
@@ -55,12 +41,16 @@ def register_crop_routes(app):
             return dict(db.execute("SELECT * FROM agr_crop_cycles WHERE parcel_id=? AND season=?", (item.parcel_id, item.season)).fetchone())
 
     @app.get("/crop/cycles/{cycle_id}/bbch")
-    def list_bbch(cycle_id: int):
+    def list_bbch(cycle_id: int, user: CurrentUser):
+        cycle = require_cycle(cycle_id, user)
         with connect() as db:
-            return [dict(r) for r in db.execute("SELECT * FROM agr_bbch_observations WHERE cycle_id=? ORDER BY observed_at DESC,id DESC", (cycle_id,))]
+            rows = [dict(r) for r in db.execute("SELECT * FROM agr_bbch_observations WHERE cycle_id=? ORDER BY observed_at DESC,id DESC", (cycle_id,))]
+        from phenology import assess
+        return [dict(r,phenology=assess(dict(cycle,latest_bbch=r))) for r in rows]
 
     @app.post("/crop/cycles/{cycle_id}/bbch", status_code=201)
-    def add_bbch(cycle_id: int, item: BBCHIn):
+    def add_bbch(cycle_id: int, item: BBCHIn, user: CurrentUser):
+        require_cycle(cycle_id, user)
         with connect() as db:
             if not db.execute("SELECT id FROM agr_crop_cycles WHERE id=?", (cycle_id,)).fetchone():
                 raise HTTPException(404, "Ciclo non trovato")

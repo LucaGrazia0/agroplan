@@ -12,7 +12,15 @@ from typing import Literal
 import httpx
 from PIL import Image, ImageChops, ImageDraw
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
+from contextlib import asynccontextmanager
+from storage import initialize
+from auth import require_user, router as auth_router
+from parcel_api import router as parcel_router
+from weather_history import daily_window
+from web_app import mount_web_app, web_directory
+import math
+import sys
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -21,9 +29,19 @@ load_dotenv()
 TOKEN_URL = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
 SH_BASE = "https://sh.dataspace.copernicus.eu/api/v1"
 
-app = FastAPI(title="AgroPlan Sentinel-2 Backend", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app):
+    initialize()
+    yield
+
+
+app = FastAPI(title="AgroPlan API", version="0.3.0", lifespan=lifespan)
+app.include_router(auth_router)
+app.include_router(parcel_router)
+from photo_analysis import router as photo_router
+app.include_router(photo_router)
 origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8080,http://localhost:8090,http://127.0.0.1:8090,http://localhost:8091,http://127.0.0.1:8091,http://localhost:5173").split(",") if x.strip()]
-app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False, allow_methods=["GET", "POST"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False, allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["*"])
 
 _token: str | None = None
 _token_expiry = 0.0
@@ -169,16 +187,16 @@ def data_filter(day: DateType, max_cloud: float) -> dict:
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "credentials_configured": bool(os.getenv("COPERNICUS_CLIENT_ID") and os.getenv("COPERNICUS_CLIENT_SECRET"))}
+    return {"status": "ok", "service": "agroplan", "version": app.version, "web_available": (web_directory() / "index.html").is_file(), "credentials_configured": bool(os.getenv("COPERNICUS_CLIENT_ID") and os.getenv("COPERNICUS_CLIENT_SECRET"))}
 
 
-@app.get("/auth/check")
+@app.get("/auth/check", dependencies=[Depends(require_user)])
 async def auth_check():
     await get_token()
     return {"authenticated": True}
 
 
-@app.post("/scenes")
+@app.post("/scenes", dependencies=[Depends(require_user)])
 async def scenes(req: ScenesRequest):
     body = {"collections": ["sentinel-2-l2a"], "datetime": f"{req.start_date.isoformat()}T00:00:00Z/{req.end_date.isoformat()}T23:59:59Z", "intersects": req.geometry, "limit": req.limit}
     r = await sentinel_post("/catalog/1.0.0/search", body, "application/geo+json")
@@ -221,7 +239,7 @@ def mask_overlay_to_geometry(png: bytes, geometry: dict, bbox: list[float]) -> b
     return out.getvalue()
 
 
-@app.post("/overlay")
+@app.post("/overlay", dependencies=[Depends(require_user)])
 async def overlay(req: OverlayRequest):
     day = req.date or DateType.today() - timedelta(days=7)
     bbox = bbox_from_geometry(req.geometry)
@@ -230,22 +248,23 @@ async def overlay(req: OverlayRequest):
     return Response(content=mask_overlay_to_geometry(r.content, req.geometry, bbox), media_type="image/png", headers={"Cache-Control": "private, max-age=600", "X-BBox": ",".join(map(str, bbox))})
 
 
-@app.post("/statistics")
+@app.post("/statistics", dependencies=[Depends(require_user)])
 async def statistics(req: GeometryRequest):
     day = req.date or DateType.today() - timedelta(days=7)
-    bbox = bbox_from_geometry(req.geometry)
     results = {}
     for index in ("ndvi", "dvi"):
-        # A numeric output band and a separate validity mask are provided by evalscript.
-        # The statistical API uses output.dataMask to exclude invalid pixels.
-        script = evalscript(index, stats=True).replace('output: { bands: 2, sampleType: "FLOAT32" }', 'output: [{ id: "index", bands: 1, sampleType: "FLOAT32" }, { id: "dataMask", bands: 1 }]')
-        script = script.replace('return [value, valid ? 1 : 0];', 'return { index: [value], dataMask: [valid ? 1 : 0] };')
-        body = {"input": {"bounds": {"geometry": req.geometry, "properties": {"crs": "http://www.opengis.net/def/crs/OGC/1.3/CRS84"}}, "data": [{"type": "sentinel-2-l2a", "dataFilter": data_filter(day, req.max_cloud_coverage)}]}, "aggregation": {"timeRange": data_filter(day, req.max_cloud_coverage)["timeRange"], "aggregationInterval": {"of": "P1D"}, "evalscript": script, "resx": 10, "resy": 10}, "calculations": {"index": {"statistics": {"default": {"percentiles": {"k": [25, 50, 75]}}}}}}
-        r = await sentinel_post("/statistics", body)
-        data = r.json().get("data", [])
-        outputs = [x.get("outputs", {}).get("index", {}).get("bands", {}).get("B0", {}).get("stats", {}) for x in data]
-        results[index] = {"mean": outputs[0].get("mean") if outputs else None, "stDev": outputs[0].get("stDev") if outputs else None, "sampleCount": outputs[0].get("sampleCount") if outputs else None}
-    return {"date": day.isoformat(), "bbox": bbox, "indices": results, "note": "Null values mean no valid observations. Statistics use 10 m pixels and exclude cloudy/shadow/snow pixels."}
+        # Use the same full-day interval and parser as the time-series endpoint.
+        # Ending at 23:59:59 makes a P1D interval incomplete and can return no data.
+        observation = await parcel_stats_for_date(ParcelTimeSeriesRequest(
+            geometry=req.geometry, dates=[day], index=index,
+            max_cloud_coverage=req.max_cloud_coverage,
+        ), day)
+        results[index] = {
+            "mean": observation["mean"], "stDev": observation.get("stDev"),
+            "sampleCount": observation.get("sample_count"), "status": observation["status"],
+        }
+    return {"date": day.isoformat(), "bbox": bbox_from_geometry(req.geometry), "indices": results,
+            "note": "Statistiche sul poligono con maschera nuvole e campionamento di circa 10 m. Valori nulli indicano assenza di osservazioni valide."}
 
 
 
@@ -301,7 +320,7 @@ def parse_statistical_response(payload: dict, day: DateType) -> dict:
     if not isinstance(entries, list):
         raise HTTPException(502, "Risposta statistica Sentinel priva del campo data")
     empty = {"date": day.isoformat(), "mean": None, "min": None, "max": None,
-             "valid_percent": None, "sample_count": None, "valid_count": None}
+             "valid_percent": None, "sample_count": None, "valid_count": None, "stDev": None}
     if not entries:
         return {**empty, "status": "no_acquisition"}
 
@@ -316,17 +335,17 @@ def parse_statistical_response(payload: dict, day: DateType) -> dict:
             valid_count = max(0, valid_count)
         valid_percent = (100 * valid_count / count if valid_count is not None and count else None)
         mean = stats.get("mean")
-        if isinstance(mean, (int, float)) and (valid_count is None or valid_count > 0):
+        if isinstance(mean, (int, float)) and not isinstance(mean, bool) and math.isfinite(mean) and (valid_count is None or valid_count > 0):
             return {"date": day.isoformat(), "mean": mean, "min": stats.get("min"),
                     "max": stats.get("max"), "valid_percent": valid_percent,
-                    "sample_count": count, "valid_count": valid_count, "status": "ok"}
+                    "sample_count": count, "valid_count": valid_count, "stDev": stats.get("stDev"), "status": "ok"}
         if isinstance(count, (int, float)) and valid_count == 0:
             return {**empty, "sample_count": count, "valid_count": 0,
                     "valid_percent": 0.0 if count else None, "status": "no_valid_pixels"}
     raise HTTPException(502, "Formato statistiche Sentinel inatteso: controllare outputs.index.bands.B0.stats")
 
 
-@app.post("/parcel-timeseries")
+@app.post("/parcel-timeseries", dependencies=[Depends(require_user)])
 async def parcel_timeseries(req: ParcelTimeSeriesRequest):
     unique_days = sorted(set(req.dates))
     # Sequential calls deliberately limit instantaneous Copernicus quota consumption.
@@ -384,10 +403,10 @@ def _weather_rows(raw):
 def _weather_result(req, end_date, history, source,
                     forecast=None, current=None, note=""):
     def rain_total(days):
-        rows = history[-days:]
+        rows = daily_window(history, days, end_date)
         values = [r.get("precipitation_sum") for r in rows]
         if len(rows) != days or any(
-            not isinstance(v, (int, float)) or isinstance(v, bool)
+            not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v)
             for v in values
         ):
             return None
@@ -426,7 +445,7 @@ async def _nasa_weather(req, today):
     }
 
     try:
-        async with httpx.AsyncClient(timeout=90) as client:
+        async with httpx.AsyncClient(timeout=20) as client:
             response = await client.get(
                 "https://power.larc.nasa.gov/api/temporal/daily/point",
                 params=params,
@@ -512,14 +531,14 @@ async def _met_norway_weather(req):
     from zoneinfo import ZoneInfo
 
     headers = {
-        "User-Agent": "AgroPlan/0.1 (agricultural weather application)"
+        "User-Agent": "AgroPlan/0.3 (+https://github.com/LucaGrazia0)"
     }
     params = {
         "lat": round(req.latitude, 5),
         "lon": round(req.longitude, 5),
     }
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=15) as client:
         response = await client.get(
             "https://api.met.no/weatherapi/locationforecast/2.0/compact",
             params=params,
@@ -644,7 +663,54 @@ async def _met_norway_weather(req):
 
     return current, forecast
 
-@app.post("/weather")
+async def _open_meteo_weather(req, today):
+    end_date = today - timedelta(days=5)
+    start_date = end_date - timedelta(days=req.history_days - 1)
+    daily = "temperature_2m_max,temperature_2m_min,precipitation_sum,et0_fao_evapotranspiration"
+    common = {"latitude": req.latitude, "longitude": req.longitude,
+              "daily": daily, "timezone": "Europe/Rome"}
+    async with httpx.AsyncClient(timeout=20) as client:
+        archive = await client.get("https://archive-api.open-meteo.com/v1/archive",
+            params={**common, "start_date": start_date.isoformat(), "end_date": end_date.isoformat()})
+        archive.raise_for_status()
+        rows = _weather_rows(archive.json().get("daily", {}))
+        normalized = daily_window(rows, req.history_days, end_date)
+        if not any(
+            isinstance(row.get(key), (int, float)) and not isinstance(row.get(key), bool) and math.isfinite(row[key]) for row in normalized for key in
+            ("temperature_2m_max", "temperature_2m_min", "precipitation_sum", "et0_fao_evapotranspiration")
+        ):
+            raise ValueError("Storico Open-Meteo privo di dati utilizzabili")
+        result = _weather_result(req, end_date, normalized, "Open-Meteo",
+            note="Dati modellati su griglia; lo storico termina alla data historical_end. ET0: Open-Meteo.")
+        # MET Norway is tried later even if this optional forecast fails.
+        try:
+            response = await client.get("https://api.open-meteo.com/v1/forecast",
+                params={**common, "forecast_days": 7,
+                        "current": "temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m"})
+            response.raise_for_status()
+            forecast = response.json()
+            result["forecast"] = _weather_rows(forecast.get("daily", {}))
+            result["current"] = forecast.get("current", {})
+            result["forecast_source"] = "Open-Meteo"
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            pass
+        return result
+
+
+@asynccontextmanager
+async def _weather_lock(key):
+    entry = _weather_locks.setdefault(key, {"lock": asyncio.Lock(), "users": 0})
+    entry["users"] += 1
+    try:
+        async with entry["lock"]:
+            yield
+    finally:
+        entry["users"] -= 1
+        if entry["users"] == 0:
+            _weather_locks.pop(key, None)
+
+
+@app.post("/weather", dependencies=[Depends(require_user)])
 async def parcel_weather(req: WeatherRequest):
     today = DateType.today()
     key = (
@@ -658,91 +724,20 @@ async def parcel_weather(req: WeatherRequest):
     if cached and time.monotonic() - cached["time"] < WEATHER_CACHE_SECONDS:
         return cached["data"]
 
-    lock = _weather_locks.setdefault(key, asyncio.Lock())
-
-    async with lock:
+    for expired_key, entry in list(_weather_cache.items()):
+        if time.monotonic() - entry["time"] >= WEATHER_CACHE_SECONDS:
+            _weather_cache.pop(expired_key, None)
+    async with _weather_lock(key):
         cached = _weather_cache.get(key)
         if cached and time.monotonic() - cached["time"] < WEATHER_CACHE_SECONDS:
             return cached["data"]
 
+        # Keep usable archive days even with gaps. Each analysis checks its own
+        # coverage; missing forecasts must not discard historical observations.
         try:
+            result = await _open_meteo_weather(req, today)
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
             result = await _nasa_weather(req, today)
-        except HTTPException:
-            print('[METEO] NASA non disponibile; provo Open-Meteo', flush=True)
-            result = None
-
-        if result is None:
-            end_date = today - timedelta(days=5)
-            start_date = end_date - timedelta(days=req.history_days - 1)
-
-            daily = (
-                "temperature_2m_max,temperature_2m_min,"
-                "precipitation_sum,et0_fao_evapotranspiration"
-            )
-
-            common = {
-                "latitude": req.latitude,
-                "longitude": req.longitude,
-                "daily": daily,
-                "timezone": "Europe/Rome",
-            }
-
-            try:
-                async with httpx.AsyncClient(timeout=35) as client:
-                    archive, future = await asyncio.gather(
-                        client.get(
-                            "https://archive-api.open-meteo.com/v1/archive",
-                            params={
-                                **common,
-                                "start_date": start_date.isoformat(),
-                                "end_date": end_date.isoformat(),
-                            },
-                        ),
-                        client.get(
-                            "https://api.open-meteo.com/v1/forecast",
-                            params={
-                                **common,
-                                "forecast_days": 7,
-                                "current": (
-                                    "temperature_2m,relative_humidity_2m,"
-                                    "precipitation,wind_speed_10m"
-                                ),
-                            },
-                        ),
-                    )
-
-                archive.raise_for_status()
-                future.raise_for_status()
-
-                historic = archive.json().get("daily", {})
-                forecast = future.json()
-
-                if not historic.get("time"):
-                    raise ValueError("Storico Open-Meteo vuoto")
-
-                result = _weather_result(
-                    req,
-                    end_date,
-                    _weather_rows(historic),
-                    "Open-Meteo",
-                    forecast=_weather_rows(
-                        forecast.get("daily", {"time": []})
-                    ),
-                    current=forecast.get("current", {}),
-                    note=(
-                        "Dati meteorologici modellati su griglia. "
-                        "Lo storico termina alla data historical_end; "
-                        "gli ultimi giorni non sono inclusi."
-                    ),
-                )
-
-            except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
-                print(
-                    f"[METEO] Open-Meteo non disponibile: "
-                    f"{type(exc).__name__}; provo NASA POWER",
-                    flush=True,
-                )
-                raise HTTPException(status_code=503, detail='Fonti meteo non disponibili')
 
         # MET Norway fornisce condizioni attuali e previsioni.
         # Lo storico rimane quello già recuperato.
@@ -763,6 +758,9 @@ async def parcel_weather(req: WeatherRequest):
                 flush=True,
             )
 
+        if len(_weather_cache) >= 256:
+            oldest = min(_weather_cache, key=lambda k: _weather_cache[k]["time"])
+            _weather_cache.pop(oldest, None)
         _weather_cache[key] = {
             "time": time.monotonic(),
             "data": result,
@@ -774,6 +772,44 @@ from crop_api import register_crop_routes
 register_crop_routes(app)
 
 app.include_router(soil_router)
+from field_records import router as field_router
+app.include_router(field_router)
+from analysis_parameters import router as parameters_router
+app.include_router(parameters_router)
+from workspace_api import router as workspace_router
+app.include_router(workspace_router)
 
 from agronomy_engine import register_agronomy_routes
-register_agronomy_routes(app, parcel_weather, WeatherRequest)
+
+async def refresh_crop_satellite(parcel_id, points):
+    from crop_analysis import geometry_hash
+    from storage import connect
+    from datetime import datetime, timezone
+    fingerprint = geometry_hash(points)
+    now = datetime.now(timezone.utc)
+    with connect() as db:
+        cached = db.execute('SELECT fetched_at FROM agr_satellite_observations WHERE parcel_id=? AND geometry_hash=? ORDER BY fetched_at DESC LIMIT 1', (parcel_id, fingerprint)).fetchone()
+    if cached and (now-datetime.fromisoformat(cached['fetched_at'])).total_seconds() < 43200:
+        return
+    ring = [[p['lng'], p['lat']] for p in points]
+    if ring[0] != ring[-1]: ring.append(ring[0])
+    geometry = {'type':'Polygon', 'coordinates':[ring]}
+    today = DateType.today()
+    available = await scenes(ScenesRequest(geometry=geometry, start_date=today-timedelta(days=45), end_date=today, limit=100))
+    days = sorted({DateType.fromisoformat(item['datetime'][:10]) for item in available['scenes'] if item.get('datetime')}, reverse=True)[:3]
+    for day in days:
+        observation = await parcel_stats_for_date(ParcelTimeSeriesRequest(geometry=geometry, dates=[day], max_cloud_coverage=100), day)
+        with connect() as db:
+            db.execute('''INSERT INTO agr_satellite_observations(parcel_id,observed_at,mean,valid_percent,fetched_at,geometry_hash)
+                VALUES(?,?,?,?,?,?) ON CONFLICT(parcel_id,observed_at) DO UPDATE SET
+                mean=excluded.mean,valid_percent=excluded.valid_percent,fetched_at=excluded.fetched_at,geometry_hash=excluded.geometry_hash''',
+                (parcel_id,day.isoformat(),observation['mean'],observation.get('valid_percent'),now.isoformat(),fingerprint))
+
+register_agronomy_routes(app, parcel_weather, WeatherRequest, refresh_crop_satellite)
+
+
+from integrations import register_integration_routes
+from integration_checks import provider_checks
+register_integration_routes(app, provider_checks(sys.modules[__name__]))
+
+mount_web_app(app)
