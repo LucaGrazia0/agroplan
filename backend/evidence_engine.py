@@ -73,4 +73,6 @@ def integrate(review,records,today=None,crop=None,windows=None,parameters=None,w
     review['decision_support']=synthesize(review,crop,today)
     from assessment_detail import enrich
     review['decision_support']=enrich(review,records,crop,today)
+    from diagnostic_center import build_center
+    review['analysis_center']=build_center(review,records,crop,today)
     return review

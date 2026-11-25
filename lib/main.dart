@@ -27,6 +27,7 @@ import 'first_steps.dart';
 import 'parcel_sections.dart';
 import 'water_parameters.dart';
 import 'keyboard_controls.dart';
+import 'analysis_center.dart';
 
 part 'parcel_sync.dart';
 
@@ -1661,6 +1662,15 @@ class _AgroPlanHomeState extends _ParcelSyncState with _ParcelSync {
             onChanged: (value) => setState(() => parcelSection = value),
           ),
           const SizedBox(height: 16),
+          if (parcelSection == 6 && selected.revision > 0)
+            AnalysisCenter(
+              key: ValueKey('center-${selected.id}'),
+              parcelId: selected.id,
+              onSectionRequested: openAnalysisSection,
+              onSaved: () {
+                if (mounted) setState(() => resultsRevision++);
+              },
+            ),
           if (parcelSection == 1) ...[
             const SizedBox(height: 18),
             const Text(

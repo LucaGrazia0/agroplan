@@ -15,6 +15,7 @@ class ParcelSections extends StatelessWidget {
     'Problematiche',
     'Coltura',
     'Mappa e satellite',
+    'Centro analisi',
   ];
   static const icons = [
     Icons.auto_graph,
@@ -23,6 +24,7 @@ class ParcelSections extends StatelessWidget {
     Icons.health_and_safety_outlined,
     Icons.grass,
     Icons.map_outlined,
+    Icons.biotech,
   ];
   @override
   Widget build(BuildContext context) => Column(
@@ -35,7 +37,7 @@ class ParcelSections extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            for (var i = 0; i < labels.length; i++)
+            for (final i in [6, 0, 1, 2, 3, 4, 5])
               SizedBox(
                 width: (constraints.maxWidth - 8) / 2,
                 child: Semantics(

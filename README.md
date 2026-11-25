@@ -1,5 +1,11 @@
 # AgroPlan
 
+## Centro analisi del frumento (2.0.0)
+
+La nuova sezione **Centro analisi** confronta gli input, esplicita le piste e propone controlli per distinguerle. Le risposte sono salvate come approfondimenti del rilievo con data reale invariata. Il confronto foto usa un modello locale nel server AgroPlan, senza API AI esterne; richiede la connessione al server e non è ancora offline sul telefono. È un prototipo limitato alle foglie di frumento e cinque etichette: ruggine bruna, ruggine gialla, septoria, oidio e riferimenti sani. Le proposte non diventano automaticamente segni confermati o diagnosi.
+
+Il modello parte da 999 foto già classificate del John Innes Centre (CC BY 4.0), con partizioni distinte e gruppi di foto simili tenuti insieme. Ha ottenuto 127 risposte corrette su 151 foto di test interno (84,11%); non è una validazione su aziende italiane o su altre colture. Corpus, procedura, metriche e limiti sono descritti in [Centro analisi e modello fotografico](docs/centro-analisi-frumento.md). Le foto dell’utente non sono usate automaticamente per addestrare il modello. Il corpus completo non entra nei pacchetti mobili; il server contiene un pacchetto statico di circa 4,6 MB con modello e piccoli riferimenti.
+
 App per particelle agricole, Sentinel-2, meteo, suolo, cicli colturali e BBCH. Interfaccia Flutter e API FastAPI vengono servite **dallo stesso indirizzo**: non occorre collegare manualmente due server. Gli account e i dati sono separati per azienda. Stato: alpha con test automatici e verifiche reali delle integrazioni; le segnalazioni agronomiche restano esplorative.
 
 ## Avvio completo sul Mac

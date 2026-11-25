@@ -1,0 +1,6 @@
+Long, M. C.; Hartley, M.; Morris, R. J.; Brown, J. K. M. (2023). Wheat disease images (small dataset). Zenodo. https://doi.org/10.5281/zenodo.7573133
+CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+EXIF orientation applied; converted to RGB JPEG, max edge 640 px; metadata removed; labels unchanged.
+The authors do not endorse AgroPlan.
+
+Feature extractor: torchvision MobileNetV3 Small, ImageNet1K V1; https://pytorch.org/vision/; torchvision BSD-3-Clause. Research baseline, not independently validated.

@@ -7,10 +7,11 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from auth import CurrentUser, require_parcel
 from storage import connect
+from diagnostic_schema import DiagnosticDetails
 
 router = APIRouter(tags=['Rilievi e risultati'])
 SYMPTOMS = {'yellowing','wilting','spots','insects','uneven_growth','no_symptoms'}
-DETAIL_DEFAULTS = {'leaf_age':'unknown','distribution':'unknown','root_condition':'unknown','noticed_since':None}
+DETAIL_DEFAULTS = {'leaf_age':'unknown','distribution':'unknown','root_condition':'unknown','noticed_since':None,'diagnostic_details':None}
 
 class Observation(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False)
@@ -25,11 +26,17 @@ class Observation(BaseModel):
     distribution: Literal['unknown','scattered','patches','uniform'] = 'unknown'
     root_condition: Literal['unknown','normal','damaged','dry'] = 'unknown'
     noticed_since: date | None = None
+    diagnostic_details: DiagnosticDetails | None = None
 
     @model_validator(mode='after')
     def valid_report(self):
         if self.observed_at > date.today(): raise ValueError('La data non può essere futura.')
         if self.noticed_since and self.noticed_since > self.observed_at: raise ValueError('L’inizio dei sintomi non può essere successivo al rilievo.')
+        if self.diagnostic_details and self.diagnostic_details.event_date:
+            if self.diagnostic_details.event_date > self.observed_at:
+                raise ValueError('L’evento deve precedere o coincidere con il rilievo.')
+            if self.diagnostic_details.recent_event in {'unknown','none'}:
+                raise ValueError('La data dell’evento richiede un evento dichiarato.')
         if not self.symptoms and not self.notes.strip(): raise ValueError('Indica cosa hai osservato.')
         if 'no_symptoms' in self.symptoms and len(set(self.symptoms))>1: raise ValueError('Assenza di sintomi incompatibile con altri sintomi.')
         self.symptoms=sorted(set(self.symptoms))

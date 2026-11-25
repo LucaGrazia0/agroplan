@@ -38,6 +38,8 @@ async def lifespan(app):
 app = FastAPI(title="AgroPlan API", version="0.3.0", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(parcel_router)
+from photo_analysis import router as photo_router
+app.include_router(photo_router)
 origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8080,http://localhost:8090,http://127.0.0.1:8090,http://localhost:8091,http://127.0.0.1:8091,http://localhost:5173").split(",") if x.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False, allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["*"])
 

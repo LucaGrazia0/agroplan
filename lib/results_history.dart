@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'api.dart' as api;
 import 'analysis_report.dart';
+import 'analysis_center_snapshot.dart';
 
 class AssessmentView extends StatelessWidget {
   const AssessmentView({super.key, required this.data});
@@ -155,16 +156,23 @@ class _SavedAnalysisViewState extends State<SavedAnalysisView> {
           decoration: const InputDecoration(
             labelText: 'Sezione del risultato salvato',
           ),
-          items: const [
-            DropdownMenuItem(value: 0, child: Text('Analisi integrata')),
-            DropdownMenuItem(value: 1, child: Text('Suolo')),
-            DropdownMenuItem(value: 2, child: Text('Meteo')),
-            DropdownMenuItem(value: 3, child: Text('Problematiche')),
+          items: [
+            const DropdownMenuItem(value: 0, child: Text('Analisi integrata')),
+            const DropdownMenuItem(value: 1, child: Text('Suolo')),
+            const DropdownMenuItem(value: 2, child: Text('Meteo')),
+            const DropdownMenuItem(value: 3, child: Text('Problematiche')),
+            if (widget.data['crop_review']?['analysis_center'] is Map)
+              const DropdownMenuItem(value: 6, child: Text('Centro analisi')),
           ],
           onChanged: (v) => setState(() => section = v ?? 0),
         ),
         const SizedBox(height: 12),
-        AnalysisReport(data: widget.data, section: section),
+        if (section == 6)
+          AnalysisCenterSnapshot(
+            data: widget.data['crop_review']['analysis_center'],
+          )
+        else
+          AnalysisReport(data: widget.data, section: section),
       ],
     ),
   );
